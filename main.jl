@@ -402,7 +402,7 @@ function car_ahead(car, model)
     rotation = [cos(car.θ) sin(car.θ); -sin(car.θ) cos(car.θ)]; # Rotation matrix for clockwise rotation by θ
     # Get all vehicles within radius of next intersection
     max_dist = dist(car.pos, car.dest[2]);
-    neighbors = filter(x -> x isa Car, Agents.space_neighbors(car, model, max_dist));
+    neighbors = filter(x -> model[x] isa Car, Agents.space_neighbors(car, model, max_dist));
     # Filter for vehicles in front with similar orientation
     nearby = filter(map(neighbors) do id
         (id, rotation * collect(model[id].pos .- car.pos), model[id].θ)
@@ -429,12 +429,13 @@ Update the speed of a car.
 """
 function update_speed!(car::Car, model)
     # Get the car ahead, up until the next intersection
-    if car.update_ahead
+    if car.update_ahead || car.speed == 0
         car.ahead = car_ahead(car, model);
         if !isnothing(car.ahead)
             car.ahead.behind = car;
         end
     end
+    car.update_ahead = false;
     v₀ = 25mph; # Assume all road speed limits of 25 mph
     l = 20.0ft; # Length of a vehicle
     # Get the acceleration of the vehicle
