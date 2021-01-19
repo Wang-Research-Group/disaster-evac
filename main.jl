@@ -12,6 +12,7 @@ const AG = ArchGDAL;
 
 
 # Unit conversions
+# These take advantage of Julia's 'numeric literal coefficients' to appear like regular units
 const s = 1.0; # Number of frames per second
 const ft = 0.3048; # ft to m
 const mins = 60s; # mins to frames
@@ -23,6 +24,9 @@ const m = 1.0 # Exactly 1, no conversion (included for completeness)
 
 road_data = OSMX.get_map_data("data/map.osm", use_cache = false, trim_to_connected_graph = true);
 
+"""
+Convert an ENU from the `OpenStreetMapX` library to a 2d tuple.
+"""
 enu_to_tuple(p::OSMX.ENU) = (p.east, p.north);
 
 edges = map(p -> (enu_to_tuple(road_data.nodes[p[1]]), enu_to_tuple(road_data.nodes[p[2]])), road_data.e);
@@ -63,6 +67,9 @@ missing_data_val = AG.getnodatavalue(AG.getband(datasets[string(initial_time)], 
 # Determine tsunami coordinates in ENU with the same origin as the road
 # network. UTM and ENU are both in meters, so no additional conversion needed
 tsunamiˣ, tsunamiʸ = begin
+    """
+    Get a list of possible values for a given dimension corresponding to x or y.
+    """
     function tsunami_coord(dim, i)
         floats = Float64.(1:dim(datasets[string(initial_time)]));
         transform_order = i == 1 ? (floats, 1.0) : (1.0, floats);
@@ -76,13 +83,14 @@ end
 # store coordinates with an origin of top left, not bottom left)
 # Use half-mins because that's the interval of the tsunami data
 tsunamiᶻ = @lift(map(x -> x == missing_data_val ? NaN : x, reverse(datasets[string($half_mins * 30)][:, :, 1], dims=2)));
+# Find minimum and maximum z values of the tsunami for heatmap normalization.
 # This can probably be done with `extrema()`, but it's nested so it's
 # complicated (and it's only computed once, unlike most calculations here)
 minᶻ = minimum(x -> minimum(filter(z -> z != missing_data_val, x[:, :, 1])), values(datasets));
 maxᶻ = maximum(x -> maximum(filter(z -> z != missing_data_val, x[:, :, 1])), values(datasets));
 
 """
-The height of the tsunami at a given position
+The height of the tsunami at a given position.
 """
 function tsunami_height(position::NTuple{2,Float64})
     x_step = geotransform[2];
@@ -118,7 +126,7 @@ mutable struct Resident <: AbstractAgent
 end
 
 """
-Initializes a `Resident` if they will never evacuate; several attributes become irrelevant
+Initializes a `Resident` if they will never evacuate; several attributes become irrelevant.
 """
 function Resident(id, pos, θ, alive)
     Resident(id, pos, (0.0, 0.0), θ, 0.0, (0, (0.0, 0.0)), false, alive, typemax(Int), Inf)
@@ -151,52 +159,69 @@ mutable struct Car <: AbstractAgent
 end
 
 """
-Max that an agent can overshoot or undershoot the destination due to a discrete timestep
+Max that an agent can overshoot or undershoot the destination due to a discrete timestep.
 """
 discrete_err(a::AbstractAgent) = 0.95 * a.speed;
 
 """
-Velocity vector based on an angle and speed
+Velocity vector based on an angle and speed.
 """
 velocity(θ::Real, speed::Float64) = speed .* (cos(θ), sin(θ));
 
 """
-Update an agent's velocity vector based on its angle and speed
+Update an agent's velocity vector based on its angle and speed.
 """
 function update_vel!(a::AbstractAgent)
     a.vel = velocity(a.θ, a.speed);
 end
 
 """
-Distance between two points
+Distance between two points.
 """
 dist(a::NTuple{2,Float64}, b::NTuple{2,Float64}) = distance(OSMX.ENU(a...), OSMX.ENU(b...));
 
-# Determine the angle between two points
+"""
+Determine the angle between two points.
+"""
 angle(a::NTuple{2,Float64}, b::NTuple{2,Float64}) = atan(b[2] - a[2], b[1] - a[1]);
 
-# Angle between the agent and its destination
+"""
+Angle between the agent and its destination.
+"""
 dest_θ(a::AbstractAgent) = angle(a.pos, a.dest[2]);
 
-# Make the agent face its destination
+"""
+Make the agent face its destination.
+"""
 function face_dest!(a::AbstractAgent)
     a.θ = dest_θ(a);
     update_vel!(a);
 end
 
+"""
+Determine the shortest path to the shelter.
+"""
 function get_path(curr_node, safety_node)
     # Only the node IDs
     node_path = OSMX.shortest_route(road_data, curr_node, safety_node)[1][2:end];
     map(x -> (x, enu_to_tuple(road_data.nodes[x])), node_path)
 end
 
+"""
+Find the next step of the path.
+"""
 next_dest(path) = popfirst!(path);
 
+"""
+Advance to the next step of the path.
+"""
 function next_dest!(a::Union{Pedestrian,Car})
     a.dest = next_dest(a.path);
 end
 
-# Color of the agent on the plot
+"""
+Color of the agent on the plot.
+"""
 function color(a::AbstractAgent)
     if !a.alive
         return :red;
@@ -209,10 +234,14 @@ function color(a::AbstractAgent)
     :green
 end
 
-# Marker of the agent on the plot
+"""
+Marker of the agent on the plot.
+"""
 marker(a::AbstractAgent) = a.alive ? :circle : :x;
 
-# Check if the tsunami killed the agent
+"""
+Check if the tsunami killed the agent.
+"""
 function tsunami_killed!(agent::AbstractAgent)
     if !agent.alive
         return true;
@@ -226,6 +255,9 @@ function tsunami_killed!(agent::AbstractAgent)
     false
 end
 
+"""
+Advance the step of a resident.
+"""
 function agent_step!(resident::Resident, model)
     if tsunami_killed!(resident) || curr_time.val < resident.milling
         return; # Done with the function
@@ -257,6 +289,9 @@ function agent_step!(resident::Resident, model)
     resident.time_remaining -= 1;
 end
 
+"""
+Advance the step of a pedestrian.
+"""
 function agent_step!(pedestrian::Pedestrian, model)
     if tsunami_killed!(pedestrian)
         return; # Done with the function
@@ -282,6 +317,9 @@ function agent_step!(pedestrian::Pedestrian, model)
     pedestrian.time_remaining -= 1;
 end
 
+"""
+Advance the step of a car.
+"""
 function agent_step!(car::Car, model)
     if tsunami_killed!(car)
         return; # Done with the function
@@ -310,7 +348,7 @@ function agent_step!(car::Car, model)
 end
 
 """
-Actuates before `agent_step!`, used for setting the car following parameters
+Actuates before `agent_step!`; used for setting the car following parameters.
 """
 function model_step!(model)
     for car ∈ collect(values(filter(p -> p.second isa Car, model.agents)))
@@ -319,7 +357,7 @@ function model_step!(model)
 end
 
 """
-Generates a random point in the range of the tsunami data; not used currently
+Generates a random point in the range of the tsunami data; not used currently.
 """
 function random_point()
     (rand() * (tsunamiˣ[end] - tsunamiˣ[1]) + tsunamiˣ[1],
@@ -327,7 +365,7 @@ function random_point()
 end
 
 """
-Free road term of the IDM car following model
+Free road term of the IDM car following model.
 """
 function idmᶠʳᵉᵉ(v, v₀)
     a = 0.73m/s^2; # Maximum acceleration
@@ -336,7 +374,7 @@ function idmᶠʳᵉᵉ(v, v₀)
 end
 
 """
-Interaction term of the IDM car following model
+Interaction term of the IDM car following model.
 """
 function idmⁱⁿᵗ(v, Δv, sₐ)
     a = 0.73m/s^2; # Maximum acceleration
@@ -348,15 +386,18 @@ function idmⁱⁿᵗ(v, Δv, sₐ)
 end
 
 """
-Acceleration produced by the IDM car following model when there is nothing to follow
+Acceleration produced by the IDM car following model when there is nothing to follow.
 """
 idm(v, v₀) = idmᶠʳᵉᵉ(v, v₀);
 
 """
-Acceleration produced by the IDM car following model when there is a car to follow
+Acceleration produced by the IDM car following model when there is a car to follow.
 """
 idm(v, v₀, Δv, sₐ) = idmᶠʳᵉᵉ(v, v₀) + idmⁱⁿᵗ(v, Δv, sₐ);
 
+"""
+Determine the car ahead, up to the next intersection.
+"""
 function car_ahead(car, model)
     rotation = [cos(car.θ) sin(car.θ); -sin(car.θ) cos(car.θ)]; # Rotation matrix for clockwise rotation by θ
     # Get all vehicles within radius of next intersection
@@ -376,13 +417,16 @@ function car_ahead(car, model)
 end
 
 """
-Set the agent's speed to a value and update its velocity
+Set the agent's speed to a value and update its velocity.
 """
 function set_speed!(a::AbstractAgent, speed)
     a.speed = speed;
     update_vel!(a);
 end
 
+"""
+Update the speed of a car.
+"""
 function update_speed!(car::Car, model)
     # Get the car ahead, up until the next intersection
     if car.update_ahead
@@ -400,10 +444,23 @@ function update_speed!(car::Car, model)
     set_speed!(car, new_speed);
 end
 
+"""
+Determine number of frames remaining until the agent reaches its next intersection.
+"""
+time_remaining(pos, dest, speed) = round(Int, dist(pos, dest[2]) / speed);
+
+"""
+Update the time remaining of an agent.
+
+For more information, refer to `time_remaining()`.
+"""
 function update_time_remaining!(a::AbstractAgent)
     a.time_remaining = time_remaining(a.pos, a.dest, a.speed);
 end
 
+"""
+Initialize the model.
+"""
 function init_model()
     space = Agents.ContinuousSpace(2; periodic = false); # 2D space
 
@@ -438,12 +495,7 @@ function init_model()
 end
 
 """
-Determine number of frames remaining until the agent reaches its destination
-"""
-time_remaining(pos, dest, speed) = round(Int, dist(pos, dest[2]) / speed);
-
-"""
-Like `reduce`, but at each step of accumulation, store it in the list; destructive
+Like `reduce`, but at each step of accumulation, store it in the list; destructive.
 """
 function reducemap!(op, list; init = 0)
     list[1] = op(list[1], init);
@@ -453,6 +505,9 @@ function reducemap!(op, list; init = 0)
     list
 end
 
+"""
+Selects a shelter based on how far away it is and a provided distribution.
+"""
 function select_shelter(pos::NTuple{2,Float64}, distribution)
     # Plug in the distance to each shelter to the distribution
     Y = Distributions.pdf.(distribution, dist.(tuple(pos), map(x -> x[2], shelters)));
@@ -464,6 +519,9 @@ function select_shelter(pos::NTuple{2,Float64}, distribution)
     shelters[searchsortedfirst(shelter_probs, rand())][1]
 end
 
+"""
+Initialize a new resident.
+"""
 function new_resident(person, milling_time, model)
     id = Agents.nextid(model);
     #id = person.ID;
@@ -487,7 +545,7 @@ function new_resident(person, milling_time, model)
 end
 
 """
-Initialize a new Pedestrian
+Initialize a new pedestrian.
 """
 function new_pedestrian(resident_pos, model)
     id = Agents.nextid(model);
@@ -508,7 +566,7 @@ function new_pedestrian(resident_pos, model)
 end
 
 """
-Initialize a new Car
+Initialize a new car.
 """
 function new_car(resident_pos, model)
     id = Agents.nextid(model);
@@ -557,7 +615,7 @@ position_list = @lift(getindex.($agent_list, 1));
 color_list = @lift(getindex.($agent_list, 2));
 marker_list = @lift(getindex.($agent_list, 3));
 
-#=
+#= Uncomment this and comment the rest of the code if you want to run without a GUI.
 hour = convert(Int, hr);
 for now in 1:hour
     curr_time[] = now
@@ -567,6 +625,7 @@ println(num_evacuated);
 println(num_dead);
 =#
 
+# Comment the rest of the code starting here and uncomment the code directly above if you want to run without a GUI.
 scene, layout = MakieLayout.layoutscene(resolution = (1200, 900))
 main_scene = layout[1:2, 1] = MakieLayout.LAxis(scene)
 evac_plot = layout[1, 2] = MakieLayout.LAxis(scene, xlabel = "Minutes", ylabel = "Total Evacuated", title = "Successful Evacuations")
