@@ -19,7 +19,7 @@ const mins = 60s; # mins to frames
 const hr = 60mins; # hrs to frames
 const mi = 5280ft; # miles to m
 const mph = 1mi / 1hr; # mph to m/frame
-const m = 1.0 # Exactly 1, no conversion (included for completeness)
+const m = 1.0; # Exactly 1, no conversion (included for completeness)
 
 
 road_data = OSMX.get_map_data("data/map.osm", use_cache = false, trim_to_connected_graph = true);
@@ -46,7 +46,7 @@ datasets = Dict();
 dir_name = "data/tsunami_inundation";
 ext = ".asc";
 for filename in filter(x -> endswith(x, ext), readdir(dir_name))
-    datasets[filename[1:end-length(ext)]] = AG.readraster(dir_name * "/" * filename)
+    datasets[filename[1:end-length(ext)]] = AG.readraster(dir_name * "/" * filename);
 end
 datasets[string(initial_time)] = datasets["30"];
 
@@ -618,25 +618,25 @@ marker_list = @lift(getindex.($agent_list, 3));
 #= Uncomment this and comment the rest of the code if you want to run without a GUI.
 hour = convert(Int, hr);
 for now in 1:hour
-    curr_time[] = now
-    sleep(.0001)
+    curr_time[] = now;
+    sleep(.0001);
 end
 println(num_evacuated);
 println(num_dead);
 =#
 
 # Comment the rest of the code starting here and uncomment the code directly above if you want to run without a GUI.
-scene, layout = MakieLayout.layoutscene(resolution = (1200, 900))
-main_scene = layout[1:2, 1] = MakieLayout.LAxis(scene)
-evac_plot = layout[1, 2] = MakieLayout.LAxis(scene, xlabel = "Minutes", ylabel = "Total Evacuated", title = "Successful Evacuations")
-death_plot = layout[2, 2] = MakieLayout.LAxis(scene, xlabel = "Minutes", ylabel = "Total Deaths", title = "Deaths")
-button = layout[0, :] = MakieLayout.LButton(scene, label = "Start/Stop")
-button.tellwidth = false
+scene, layout = MakieLayout.layoutscene(resolution = (1200, 900));
+main_scene = layout[1:2, 1] = MakieLayout.LAxis(scene);
+evac_plot = layout[1, 2] = MakieLayout.LAxis(scene, xlabel = "Minutes", ylabel = "Total Evacuated", title = "Successful Evacuations");
+death_plot = layout[2, 2] = MakieLayout.LAxis(scene, xlabel = "Minutes", ylabel = "Total Deaths", title = "Deaths");
+button = layout[0, :] = MakieLayout.LButton(scene, label = "Start/Stop");
+button.tellwidth = false;
 
-AbstractPlotting.linesegments!(main_scene, edges)
+AbstractPlotting.linesegments!(main_scene, edges);
 
 # Render a heatmap
-AbstractPlotting.heatmap!(main_scene, tsunamiˣ, tsunamiʸ, tsunamiᶻ; colormap = :GnBu_9, colorrange = (minᶻ, maxᶻ))
+AbstractPlotting.heatmap!(main_scene, tsunamiˣ, tsunamiʸ, tsunamiᶻ; colormap = :GnBu_9, colorrange = (minᶻ, maxᶻ));
 
 AbstractPlotting.scatter!(main_scene, position_list; color = color_list, markersize = 5, marker = marker_list);
 
@@ -653,10 +653,10 @@ on(button.clicks) do click
         hour = convert(Int, hr); # Make sure an hour can be evenly divided by frames
         @async for now in 1:hour
             while button.clicks.val % 2 == 0
-                sleep(.5)
+                sleep(.5);
             end
-            curr_time[] = now
-            sleep(.0001)
+            curr_time[] = now;
+            sleep(.0001);
             if now == hour
                 button.clicks[] = 0;
                 println(num_evacuated);
@@ -672,7 +672,7 @@ on(button.clicks) do click
     end
 end
 
-main_scene.aspect = MakieLayout.DataAspect()
-MakieLayout.hidedecorations!(main_scene)
+main_scene.aspect = MakieLayout.DataAspect();
+MakieLayout.hidedecorations!(main_scene);
 
 scene
