@@ -15,7 +15,24 @@ To do so:
 4. Navigate to the codebase with File -> Open Folder....
 5. Open a terminal if there isn't one already with Terminal -> New Terminal.
 6. Execute Julia (e.g., `julia.exe` on a Windows machine). This should open up a Julia REPL.
-7. Type `include("main.jl")`.
+7. Add dependency packages. This is detailed in the next section.
+8. Type `include("main.jl")`.
+
+# Adding Dependencies
+Before running this project, you need to install the appropriate dependencies.
+To do so, type `]` to get to the package manager, then type `add PKG_NAME`, where `PKG_NAME` is the name of the dependency in the list below.
+To leave the package manager, hit a single backspace.
+
+The needed dependencies are as follows:
+- OpenStreetMapX
+- CSV
+- Makie
+- AbstractPlotting
+- Agents
+- Distributions
+- ArchGDAL
+
+Once you've finished installing these dependencies, continue with step 8 in the above section.
 
 # Adjusting Locations
 To use a different dataset for a new location, replace the files in the `data` folder.
