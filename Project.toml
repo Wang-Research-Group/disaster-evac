@@ -1,0 +1,13 @@
+name = "DisasterEvac"
+uuid = "402d3b40-6a73-4b51-8eb9-096399939c61"
+authors = ["Charles Koll <kollch@oregonstate.edu>"]
+version = "0.1.0"
+
+[deps]
+AbstractPlotting = "537997a7-5e4e-5d89-9595-2241ea00577e"
+Agents = "46ada45e-f475-11e8-01d0-f70cc89e6671"
+ArchGDAL = "c9ce4bd3-c3d5-55b8-8973-c0e20141b8c3"
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+Makie = "ee78f7c6-11fb-53f2-987a-cfe4a2b5a57a"
+OpenStreetMapX = "86cd37e6-c0ff-550b-95fe-21d72c8d4fc9"

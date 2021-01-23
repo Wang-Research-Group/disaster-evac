@@ -1,14 +1,15 @@
+module DisasterEvac
+
 using OpenStreetMapX;
 using CSV;
 using Makie;
-using AbstractPlotting;
-using AbstractPlotting.MakieLayout;
 using Agents;
 using Distributions;
 using ArchGDAL;
 const OSMX = OpenStreetMapX;
-const AP = AbstractPlotting;
 const AG = ArchGDAL;
+
+include("parse_data.jl");
 
 
 # Unit conversions
@@ -22,14 +23,10 @@ const mph = 1mi / 1hr; # mph to m/frame
 const m = 1.0; # Exactly 1, no conversion (included for completeness)
 
 
-road_data = OSMX.get_map_data("data/map.osm", use_cache = false, trim_to_connected_graph = true);
-
 """
 Convert an ENU from the `OpenStreetMapX` library to a 2d tuple.
 """
 enu_to_tuple(p::OSMX.ENU) = (p.east, p.north);
-
-edges = map(p -> (enu_to_tuple(road_data.nodes[p[1]]), enu_to_tuple(road_data.nodes[p[2]])), road_data.e);
 
 # Set up observables
 initial_time = convert(Int, 0s); # Value in frames
@@ -43,7 +40,7 @@ num_dead = 0;
 # Get all of the tsunami inundation datasets as a dictionary;
 # key is filename besides extension, value is data
 datasets = Dict();
-dir_name = "data/tsunami_inundation";
+dir_name = "src/data/tsunami_inundation";
 ext = ".asc";
 for filename in filter(x -> endswith(x, ext), readdir(dir_name))
     datasets[filename[1:end-length(ext)]] = AG.readraster(dir_name * "/" * filename);
@@ -56,7 +53,7 @@ lla = AG.importEPSG(4326); # Lat-long
 geotransform = AG.getgeotransform(dataset);
 
 # Determine how far off the tsunami dataset origin is from the road network origin, as ENU/UTM
-road_center = OSMX.center(road_data.bounds); # Lat-long of center of the road network, i.e., (0, 0) ENU
+road_center = OSMX.center(Data.network.bounds); # Lat-long of center of the road network, i.e., (0, 0) ENU
 network_point = AG.createpoint(road_center.lat, road_center.lon);
 AG.createcoordtrans(lla, source) do transform
     AG.transform!(network_point, transform)
@@ -101,12 +98,12 @@ function tsunami_height(position::NTuple{2,Float64})
 end
 
 
-people_data = CSV.File("data/pop_coordinates.csv"; normalizenames = true, types = [Int, Float64, Float64, Float64, Bool]);
+people_data = CSV.File("src/data/pop_coordinates.csv"; normalizenames = true, types = [Int, Float64, Float64, Float64, Bool]);
 num_residents = length(people_data); # Number of agents
-shelter_locs = CSV.File("data/shelter_coordinates.csv"; normalizenames = true, types = [Int, Float64, Float64]); # Shelter locations
+shelter_locs = CSV.File("src/data/shelter_coordinates.csv"; normalizenames = true, types = [Int, Float64, Float64]); # Shelter locations
 shelters = [begin
-        node_id = OSMX.nearest_node(road_data, OSMX.ENU(shelter.x - tsunami_offset[1], shelter.y - tsunami_offset[2]));
-        (node_id, enu_to_tuple(road_data.nodes[node_id]))
+        node_id = OSMX.nearest_node(Data.network, OSMX.ENU(shelter.x - tsunami_offset[1], shelter.y - tsunami_offset[2]));
+        (node_id, enu_to_tuple(Data.network.nodes[node_id]))
     end
     for shelter in shelter_locs];
 
@@ -203,8 +200,8 @@ Determine the shortest path to the shelter.
 """
 function get_path(curr_node, safety_node)
     # Only the node IDs
-    node_path = OSMX.shortest_route(road_data, curr_node, safety_node)[1][2:end];
-    map(x -> (x, enu_to_tuple(road_data.nodes[x])), node_path)
+    node_path = OSMX.shortest_route(Data.network, curr_node, safety_node)[1][2:end];
+    map(x -> (x, enu_to_tuple(Data.network.nodes[x])), node_path)
 end
 
 """
@@ -534,8 +531,8 @@ function new_resident(person, milling_time, model)
     resident = if will_evac
         speed = 5mph;
         vel = velocity(θ, speed);
-        dest_id = OSMX.nearest_node(road_data, OSMX.ENU(pos...));
-        dest = (dest_id, enu_to_tuple(road_data.nodes[dest_id]));
+        dest_id = OSMX.nearest_node(Data.network, OSMX.ENU(pos...));
+        dest = (dest_id, enu_to_tuple(Data.network.nodes[dest_id]));
         remaining_time = time_remaining(pos, dest, speed);
         Resident(id, pos, vel, θ, speed, dest, false, true, remaining_time, milling_time)
     else
@@ -616,38 +613,44 @@ position_list = @lift(getindex.($agent_list, 1));
 color_list = @lift(getindex.($agent_list, 2));
 marker_list = @lift(getindex.($agent_list, 3));
 
-#= Uncomment this and comment the rest of the code if you want to run without a GUI.
-hour = convert(Int, hr);
-for now in 1:hour
-    curr_time[] = now;
-    sleep(.0001);
+# Uncomment this and comment the rest of the code if you want to run without a GUI.
+function run_no_gui()
+    hour = convert(Int, hr);
+    for now in 1:hour
+        curr_time[] = now;
+        sleep(.0001);
+    end
+    println(num_evacuated);
+    println(num_dead);
 end
-println(num_evacuated);
-println(num_dead);
-=#
 
 # Comment the rest of the code starting here and uncomment the code directly above if you want to run without a GUI.
-scene, layout = MakieLayout.layoutscene(resolution = (1200, 900));
-main_scene = layout[1:2, 1] = MakieLayout.LAxis(scene);
-evac_plot = layout[1, 2] = MakieLayout.LAxis(scene, xlabel = "Minutes", ylabel = "Total Evacuated", title = "Successful Evacuations");
-death_plot = layout[2, 2] = MakieLayout.LAxis(scene, xlabel = "Minutes", ylabel = "Total Deaths", title = "Deaths");
-button = layout[0, :] = MakieLayout.LButton(scene, label = "Start/Stop");
+fig = Makie.Figure(; resolution = (1200, 900));
+simulation = fig[1:2, 1] = Makie.Axis(fig);
+evac_plot = fig[1, 2] = Makie.Axis(fig; xlabel = "Minutes", ylabel = "Total Evacuated", title = "Successful Evacuations");
+death_plot = fig[2, 2] = Makie.Axis(fig; xlabel = "Minutes", ylabel = "Total Deaths", title = "Deaths");
+Makie.linkaxes!(evac_plot, death_plot);
+button = fig[0, :] = Makie.Button(fig; label = "Start/Stop");
 button.tellwidth = false;
 
-AbstractPlotting.linesegments!(main_scene, edges);
+edges = map(p -> (enu_to_tuple(Data.network.nodes[p[1]]), enu_to_tuple(Data.network.nodes[p[2]])), Data.network.e);
+Makie.linesegments!(simulation, edges);
 
 # Render a heatmap
-AbstractPlotting.heatmap!(main_scene, tsunamiˣ, tsunamiʸ, tsunamiᶻ; colormap = :GnBu_9, colorrange = (minᶻ, maxᶻ));
+Makie.heatmap!(simulation, tsunamiˣ, tsunamiʸ, tsunamiᶻ; colormap = :GnBu_9, colorrange = (minᶻ, maxᶻ));
 
-AbstractPlotting.scatter!(main_scene, position_list; color = color_list, markersize = 5, marker = marker_list);
+Makie.scatter!(simulation, position_list; color = color_list, markersize = 5, marker = marker_list);
 
-AbstractPlotting.scatter!(evac_plot, evac_list);
-MakieLayout.limits!(evac_plot, 0, 60, 0, num_residents);
+Makie.scatter!(evac_plot, evac_list);
+Makie.limits!(evac_plot, 0, 60, 0, num_residents);
 
-AbstractPlotting.scatter!(death_plot, death_list);
-MakieLayout.limits!(death_plot, 0, 60, 0, num_residents);
+Makie.scatter!(death_plot, death_list);
+Makie.limits!(death_plot, 0, 60, 0, num_residents);
 
-AbstractPlotting.scatter!(main_scene, [shelter[2] for shelter in shelters]; color = :blue);
+Makie.scatter!(simulation, [shelter[2] for shelter in shelters]; color = :blue);
+
+simulation.aspect = Makie.DataAspect();
+Makie.hidedecorations!(simulation);
 
 on(button.clicks) do click
     if click == 1
@@ -659,21 +662,35 @@ on(button.clicks) do click
             curr_time[] = now;
             sleep(.0001);
             if now == hour
-                button.clicks[] = 0;
                 println(num_evacuated);
                 println(num_dead);
-                global model = init_model();
-                curr_time[] = initial_time;
-                evac_list[] = [(0, 0)];
-                global num_evacuated = 0;
-                death_list[] = [(0, 0)];
-                global num_dead = 0;
+                button.clicks[] = 0;
             end
         end
     end
 end
 
-main_scene.aspect = MakieLayout.DataAspect();
-MakieLayout.hidedecorations!(main_scene);
+on(fig.scene.events.window_open) do status
+    # If window just closed, reset for a new run
+    if !fig.scene.events.window_open.val
+        global model = init_model();
+        curr_time[] = initial_time;
+        evac_list[] = [(0, 0)];
+        global num_evacuated = 0;
+        death_list[] = [(0, 0)];
+        global num_dead = 0;
+    end
+end
 
-scene
+function run_gui()
+    Makie.display(fig);
+end
+
+function run_record()
+    hour = convert(Int, hr);
+    Makie.record(fig, "animation.mp4", 1:hour; framerate = 60) do t
+        curr_time[] = t;
+    end
+end
+
+end # module

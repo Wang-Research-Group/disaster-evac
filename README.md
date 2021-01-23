@@ -3,7 +3,14 @@ Simulation that models evacuation from natural disasters.
 Currently designed to be tsunami-specific.
 
 # Installation
-To run, make this repo your current working directory, then run `include("main.jl")` in a Julia REPL.
+To run, open a Julia REPL in the directory of this repo, then execute the following steps:
+
+1. `]activate .`
+2. `include("src/DisasterEvac.jl")`
+3. Run the simulation
+- With a graphical interface: `DisasterEvac.run_gui()`
+- Without a graphical interface: `DisasterEvac.run_no_gui()`
+- Record an animation: `DisasterEvac.run_record()`
 
 # Suggested Workflow
 We suggest you use Visual Studio Code with the Julia extension when navigating the codebase, as it provides some nice Julia-specific suggestions and allows you to run a REPL at the same time as looking at the code.
@@ -15,24 +22,7 @@ To do so:
 4. Navigate to the codebase with File -> Open Folder....
 5. Open a terminal if there isn't one already with Terminal -> New Terminal.
 6. Execute Julia (e.g., `julia.exe` on a Windows machine). This should open up a Julia REPL.
-7. Add dependency packages. This is detailed in the next section.
-8. Type `include("main.jl")`.
-
-# Adding Dependencies
-Before running this project, you need to install the appropriate dependencies.
-To do so, type `]` to get to the package manager, then type `add PKG_NAME`, where `PKG_NAME` is the name of the dependency in the list below.
-To leave the package manager, hit a single backspace.
-
-The needed dependencies are as follows:
-- OpenStreetMapX
-- CSV
-- Makie
-- AbstractPlotting
-- Agents
-- Distributions
-- ArchGDAL
-
-Once you've finished installing these dependencies, continue with step 8 in the above section.
+7. Follow the three steps in the Installation section above.
 
 # Adjusting Locations
 To use a different dataset for a new location, replace the files in the `data` folder.
