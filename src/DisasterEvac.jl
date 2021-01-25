@@ -665,20 +665,23 @@ function reset_model!()::Nothing
     nothing
 end
 
-function run_no_gui(; times=1)::Array{Tuple{Int,Int},1}
+function run_no_gui(times)::Array{Tuple{Int,Int},1}
     hour = convert(Int, hr);
     stats = [];
-    for _ in 1:times
+    for i in 1:times
+        if (times != 1) println("Run ", i) end
         for now in 1:hour
             curr_time[] = now;
         end
-        println(num_evacuated);
-        println(num_dead);
+        println("Evacuated: ", num_evacuated);
+        println("Dead: ", num_dead);
         push!(stats, (num_evacuated, num_dead));
         reset_model!();
     end
     stats
 end
+
+run_no_gui() = run_no_gui(1);
 
 function run_gui()::Nothing
     Makie.display(fig);
@@ -695,8 +698,8 @@ Makie.on(button.clicks) do click
             curr_time[] = now;
             sleep(.0001); # Needed so the frame can render
             if now == hour
-                println(num_evacuated);
-                println(num_dead);
+                println("Evacuated: ", num_evacuated);
+                println("Dead: ", num_dead);
                 button.clicks[] = 0;
             end
         end
@@ -715,8 +718,8 @@ function run_record(filename)::Nothing
     Makie.record(fig, filename, 1:hour; framerate = 60) do t
         curr_time[] = t;
     end
-    println(num_evacuated);
-    println(num_dead);
+    println("Evacuated: ", num_evacuated);
+    println("Dead: ", num_dead);
     reset_model!();
     nothing
 end
