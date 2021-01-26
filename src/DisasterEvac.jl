@@ -9,30 +9,14 @@ import ArchGDAL;
 const OSMX = OpenStreetMapX;
 const AG = ArchGDAL;
 
+include("utilities.jl");
+using .Utils;
+
 include("parse_data.jl");
-using .Data: refresh_data;
 
-export refresh_data;
-
-
-# Unit conversions
-# These take advantage of Julia's 'numeric literal coefficients' to appear like regular units
-const s = 1.0; # Number of frames per second
-const ft = 0.3048; # ft to m
-const mins = 60s; # mins to frames
-const hr = 60mins; # hrs to frames
-const mi = 5280ft; # miles to m
-const mph = 1mi / 1hr; # mph to m/frame
-const m = 1.0; # Exactly 1, no conversion (included for completeness)
 
 const Agent = Agents.AbstractAgent;
-const Point = NTuple{2,Float64};
 
-
-"""
-Convert an ENU from the `OpenStreetMapX` library to a 2D tuple.
-"""
-enu_to_tuple(p::OSMX.ENU)::Point = (p.east, p.north);
 
 # Set up observables
 initial_time = convert(Int, 0s); # Value in frames
@@ -43,75 +27,40 @@ half_mins = Makie.Node{Int}(floor(initial_time / 30s)); # Value rounded down in 
 num_evacuated = 0;
 num_dead = 0;
 
-# Get all of the tsunami inundation datasets as a dictionary;
-# key is filename besides extension, value is data
-datasets = Dict();
-dir_name = "src/data/tsunami_inundation";
-ext = ".asc";
-for filename in filter(x -> endswith(x, ext), readdir(dir_name))
-    datasets[filename[1:end-length(ext)]] = AG.readraster(dir_name * "/" * filename);
-end
-datasets[string(initial_time)] = datasets["30"];
-
-dataset = datasets[string(initial_time)];
-source = AG.importWKT(AG.getproj(dataset)); # For the tsunami asc files, the projection is UTM
-lla = AG.importEPSG(4326); # Lat-long
-geotransform = AG.getgeotransform(dataset);
-
-# Determine how far off the tsunami dataset origin is from the road network origin, as ENU/UTM
-road_center = OSMX.center(Data.network.bounds); # Lat-long of center of the road network, i.e., (0, 0) ENU
-network_point = AG.createpoint(road_center.lat, road_center.lon);
-AG.createcoordtrans(lla, source) do transform
-    AG.transform!(network_point, transform)
-end
-tsunami_offset = (AG.getx(network_point, 0), AG.gety(network_point, 0));
-
-missing_data_val = AG.getnodatavalue(AG.getband(datasets[string(initial_time)], 1));
-# Determine tsunami coordinates in ENU with the same origin as the road
-# network. UTM and ENU are both in meters, so no additional conversion needed
-tsunamiˣ, tsunamiʸ = begin
-    """
-    Get a list of possible values for a given dimension corresponding to x or y.
-    """
-    function tsunami_coord(dim, i)
-        floats = Float64.(1:dim(datasets[string(initial_time)]));
-        transform_order = i == 1 ? (floats, 1.0) : (1.0, floats);
-        map(x -> x[i], AG.applygeotransform.(tuple(geotransform), transform_order...)) .- tsunami_offset[i]
-    end
-    tsunami_coord(AG.width, 1), reverse(tsunami_coord(AG.height, 2))
-end
-# Replace the NaN value in the raw dataset (usually -9999) with NaN. Can't use
-# `missing` because the `heatmap` function doesn't know how to handle it. Also
-# flip the coordinates so it's not upside down (necessary because the asc files
-# store coordinates with an origin of top left, not bottom left)
-# Use half-mins because that's the interval of the tsunami data
-tsunamiᶻ = Makie.@lift(map(x -> x == missing_data_val ? NaN : x, reverse(datasets[string($half_mins * 30)][:, :, 1], dims=2)));
-# Find minimum and maximum z values of the tsunami for heatmap normalization.
-# This can probably be done with `extrema()`, but it's nested so it's
-# complicated (and it's only computed once, unlike most calculations here)
-minᶻ = minimum(x -> minimum(filter(z -> z != missing_data_val, x[:, :, 1])), values(datasets));
-maxᶻ = maximum(x -> maximum(filter(z -> z != missing_data_val, x[:, :, 1])), values(datasets));
-
-"""
-The height of the tsunami at a given position.
-"""
-function tsunami_height(position::Point)::Float64
-    x_step = geotransform[2];
-    y_step = -geotransform[6];
-    x_index::Int = floor((position[1] - tsunamiˣ[1]) / x_step) + 1;
-    y_index::Int = floor((position[2] - tsunamiʸ[1]) / y_step) + 1;
-    tsunamiᶻ.val[x_index,y_index]
+function set_filenames()
+    filenames = Dict();
+    filenames["network"] = "src/data/map.osm";
+    filenames["tsunami"] = "src/data/tsunami_inundation";
+    filenames["people"] = "src/data/pop_coordinates.csv";
+    filenames["shelters"] = "src/data/shelter_coordinates.csv";
+    filenames
 end
 
+filenames = set_filenames();
 
-people_data = CSV.File("src/data/pop_coordinates.csv"; normalizenames = true, types = [Int, Float64, Float64, Float64, Bool]);
-num_residents = length(people_data); # Number of agents
-shelter_locs = CSV.File("src/data/shelter_coordinates.csv"; normalizenames = true, types = [Int, Float64, Float64]); # Shelter locations
-shelters = [begin
-        node_id = OSMX.nearest_node(Data.network, OSMX.ENU(shelter.x - tsunami_offset[1], shelter.y - tsunami_offset[2]));
-        (node_id, enu_to_tuple(Data.network.nodes[node_id]))
-    end
-    for shelter in shelter_locs];
+
+network = Data.network(filenames["network"]);
+
+tsunamiˣ, tsunamiʸ, tsunamiᶻ, tsunami_offset = Data.tsunami_data(initial_time, half_mins, network, filenames["tsunami"]);
+minᶻ, maxᶻ = Data.tsunami_extrema();
+
+people = Data.people(filenames["people"]);
+num_residents = length(people); # Number of agents
+shelters = Data.shelters(network, filenames["shelters"]);
+
+function refresh_data()::Nothing
+    data = Data.refresh_data(initial_time, half_mins,
+                             filenames["network"], filenames["tsunami"],
+                             filenames["people"], filenames["shelters"]
+    );
+    network = data[1];
+    tsunamiˣ, tsunamiʸ, tsunamiᶻ, tsunami_offset = data[2];
+    minᶻ, maxᶻ = data[3];
+    people = data[4];
+    shelters = data[5];
+    nothing
+end
+
 
 # Time to initialize the agent model
 
@@ -180,19 +129,9 @@ function update_vel!(a::Agent)::Nothing
 end
 
 """
-Distance between two points.
-"""
-dist(a::Point, b::Point)::Float64 = OSMX.distance(OSMX.ENU(a...), OSMX.ENU(b...));
-
-"""
-Determine the angle between two points.
-"""
-angle(a::Point, b::Point)::Float64 = atan(b[2] - a[2], b[1] - a[1]);
-
-"""
 Angle between the agent and its destination.
 """
-dest_θ(a::Agent)::Float64 = angle(a.pos, a.dest[2]);
+dest_θ(a::Agent)::Float64 = Utils.angle(a.pos, a.dest[2]);
 
 """
 Make the agent face its destination.
@@ -207,8 +146,8 @@ Determine the shortest path to the shelter.
 """
 function get_path(curr_node, safety_node)::Array{Tuple{Int64,Point},1}
     # Only the node IDs
-    node_path = OSMX.shortest_route(Data.network, curr_node, safety_node)[1][2:end];
-    map(x -> (x, enu_to_tuple(Data.network.nodes[x])), node_path)
+    node_path = OSMX.shortest_route(network, curr_node, safety_node)[1][2:end];
+    map(x -> (x, enu_to_tuple(network.nodes[x])), node_path)
 end
 
 """
@@ -243,6 +182,16 @@ end
 Marker of the agent on the plot.
 """
 marker(a::Agent)::Symbol = a.alive ? :circle : :x;
+
+"""
+The height of the tsunami at a given position.
+"""
+function tsunami_height(position::Point)::Float64
+    x_step, y_step = Data.tsunami_resolution();
+    x_index::Int = floor((position[1] - tsunamiˣ[1]) / x_step) + 1;
+    y_index::Int = floor((position[2] - tsunamiʸ[1]) / y_step) + 1;
+    tsunamiᶻ.val[x_index,y_index]
+end
 
 """
 Check if the tsunami killed the agent.
@@ -446,7 +395,7 @@ function update_speed!(car::Car, model)::Nothing
         end
     end
     car.update_ahead = false;
-    v₀ = 25mph; # Assume all road speed limits of 25 mph
+    v₀ = model.speed_limit;
     l = 20.0ft; # Length of a vehicle
     # Get the acceleration of the vehicle
     a = isnothing(car.ahead) ? idm(car.speed, v₀) : idm(car.speed, v₀, car.speed - car.ahead.speed, dist(car.pos, car.ahead.pos) - l);
@@ -482,6 +431,9 @@ function init_model()::Agents.ABM
     properties[:ped_shelter_distribution] = Distributions.Gamma(1.920, 1/0.002);
     properties[:car_shelter_distribution] = Distributions.Gamma(1.646, 1/0.000573);
 
+    # Set all road speed limits of 25 mph
+    properties[:speed_limit] = 25mph;
+
     # Resident needs to go last in each step, otherwise when they transform the agent will get an extra movement
     model = Agents.AgentBasedModel(
         Union{Resident,Pedestrian,Car},
@@ -496,7 +448,7 @@ function init_model()::Agents.ABM
     σ = 0.85;
     milling_distribution = Distributions.LogNormal(μ, σ);
 
-    for person in people_data
+    for person in people
         # A distribution provides the number of minutes to mill around (plus the min wait)
         min_wait = 0mins; # Every resident has a milling time of at least this value
         milling_time = rand(milling_distribution)*mins + min_wait;
@@ -539,15 +491,17 @@ function new_resident(person, milling_time, model)::Resident
     id = Agents.nextid(model);
     #id = person.ID;
     #pos = random_point();
-    pos = (person.X - tsunami_offset[1], person.Y - tsunami_offset[2]);
-    will_evac = person.Attribute_2;
+    #pos = (person.X - tsunami_offset[1], person.Y - tsunami_offset[2]);
+    pos = person.pos;
+    #will_evac = person.Attribute_2;
+    will_evac = person.evac;
     # Initialize resident facing to the right
     θ = 0;
     resident = if will_evac
         speed = 5mph;
         vel = velocity(θ, speed);
-        dest_id = OSMX.nearest_node(Data.network, OSMX.ENU(pos...));
-        dest = (dest_id, enu_to_tuple(Data.network.nodes[dest_id]));
+        dest_id = OSMX.nearest_node(network, OSMX.ENU(pos...));
+        dest = (dest_id, enu_to_tuple(network.nodes[dest_id]));
         remaining_time = time_remaining(pos, dest, speed);
         Resident(id, pos, vel, θ, speed, dest, false, true, remaining_time, milling_time)
     else
@@ -583,7 +537,7 @@ Initialize a new car.
 """
 function new_car(resident_pos, model)::Car
     id = Agents.nextid(model);
-    speed = 25mph;
+    speed = model.speed_limit;
     # Initialize car facing to the right
     θ = 0;
     vel = velocity(θ, speed);
@@ -636,7 +590,7 @@ Makie.linkaxes!(evac_plot, death_plot);
 button = fig[0, :] = Makie.Button(fig; label = "Start/Stop");
 button.tellwidth = false;
 
-edges = map(p -> (enu_to_tuple(Data.network.nodes[p[1]]), enu_to_tuple(Data.network.nodes[p[2]])), Data.network.e);
+edges = map(p -> (enu_to_tuple(network.nodes[p[1]]), enu_to_tuple(network.nodes[p[2]])), network.e);
 Makie.linesegments!(simulation, edges);
 
 # Render a heatmap
