@@ -17,6 +17,8 @@ include("parse_data.jl");
 
 const Agent = Agents.AbstractAgent;
 
+default_params = (25mph, 0mins);
+
 
 # Set up observables
 initial_time = convert(Int, 0s); # Value in frames
@@ -423,7 +425,7 @@ end
 """
 Initialize the model.
 """
-function init_model()::Agents.ABM
+function init_model(speed_limit, min_wait)::Agents.ABM
     space = Agents.ContinuousSpace(2; periodic = false); # 2D space
 
     properties = Dict();
@@ -431,8 +433,8 @@ function init_model()::Agents.ABM
     properties[:ped_shelter_distribution] = Distributions.Gamma(1.920, 1/0.002);
     properties[:car_shelter_distribution] = Distributions.Gamma(1.646, 1/0.000573);
 
-    # Set all road speed limits of 25 mph
-    properties[:speed_limit] = 25mph;
+    # Set all road speed limits in mph
+    properties[:speed_limit] = speed_limit;
 
     # Resident needs to go last in each step, otherwise when they transform the agent will get an extra movement
     model = Agents.AgentBasedModel(
@@ -450,7 +452,7 @@ function init_model()::Agents.ABM
 
     for person in people
         # A distribution provides the number of minutes to mill around (plus the min wait)
-        min_wait = 0mins; # Every resident has a milling time of at least this value
+        # Min wait is in mins
         milling_time = rand(milling_distribution)*mins + min_wait;
         resident = new_resident(person, milling_time, model);
         Agents.add_agent_pos!(resident, model);
@@ -458,6 +460,8 @@ function init_model()::Agents.ABM
     Agents.index!(model);
     model
 end
+
+init_model() = init_model(default_params...);
 
 """
 Like `reduce`, but at each step of accumulation, store it in the list; destructive.
@@ -609,8 +613,8 @@ Makie.scatter!(simulation, [shelter[2] for shelter in shelters]; color = :blue);
 simulation.aspect = Makie.DataAspect();
 Makie.hidedecorations!(simulation);
 
-function reset_model!()::Nothing
-    global model = init_model();
+function reset_model!(speed_limit, min_wait)::Nothing
+    global model = init_model(speed_limit, min_wait);
     curr_time[] = initial_time;
     evac_list[] = [(0, 0)];
     global num_evacuated = 0;
@@ -619,21 +623,27 @@ function reset_model!()::Nothing
     nothing
 end
 
-function run_no_gui(times)::Array{Tuple{Int,Int},1}
+function run_no_gui(times, options)::Array{Tuple{Int,Int},1}
     hour = convert(Int, hr);
     stats = [];
-    for i in 1:times
-        if (times != 1) println("Run ", i) end
-        for now in 1:hour
-            curr_time[] = now;
+    for option ∈ options
+        println("Option ", option);
+        for i in 1:times
+            println("Run ", i);
+            reset_model!(float(option[1]), float(option[2]));
+            for now in 1:hour
+                curr_time[] = now;
+            end
+            println("Evacuated: ", num_evacuated);
+            println("Dead: ", num_dead);
+            push!(stats, (num_evacuated, num_dead));
         end
-        println("Evacuated: ", num_evacuated);
-        println("Dead: ", num_dead);
-        push!(stats, (num_evacuated, num_dead));
-        reset_model!();
     end
+    reset_model!(default_params...);
     stats
 end
+
+run_no_gui(times) = run_no_gui(times, [default_params]);
 
 run_no_gui() = run_no_gui(1);
 
