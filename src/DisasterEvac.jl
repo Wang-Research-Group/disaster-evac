@@ -464,17 +464,6 @@ end
 init_model() = init_model(default_params...);
 
 """
-Like `reduce`, but at each step of accumulation, store it in the list; destructive.
-"""
-function reducemap!(op, list::Array{<:Any,1}; init = 0)::Array{<:Any,1}
-    list[1] = op(list[1], init);
-    for (i, item) in enumerate(list[2:end])
-        list[i + 1] = op(item, list[i]);
-    end
-    list
-end
-
-"""
 Selects a shelter based on how far away it is and a provided distribution.
 """
 function select_shelter(pos::Point, distribution)::Int64
@@ -483,7 +472,7 @@ function select_shelter(pos::Point, distribution)::Int64
     # Normalize based on Luce's choice axiom
     shelter_probs = Y ./ sum(Y); # Softmax function; don't need exp because they're already probabilities
     # Sum the probabilities so they go from 0-1
-    reducemap!(+, shelter_probs);
+    cumsum!(shelter_probs, shelter_probs);
     # Determine the index the random number would fall between, then return the corresponding shelter ID
     shelters[searchsortedfirst(shelter_probs, rand())][1]
 end
