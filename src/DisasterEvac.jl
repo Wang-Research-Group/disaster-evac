@@ -17,7 +17,7 @@ include("parse_data.jl");
 
 const Agent = Agents.AbstractAgent;
 
-default_params = (25mph, 0mins);
+default_params = (25, 0);
 
 
 # Set up observables
@@ -613,13 +613,14 @@ function reset_model!(speed_limit, min_wait)::Nothing
 end
 
 function run_no_gui(times, options)::Array{Tuple{Int,Int},1}
+    # Interpreting options as mph and mins
     hour = convert(Int, hr);
     stats = [];
     for option ∈ options
         println("Option ", option);
         for i in 1:times
             println("Run ", i);
-            reset_model!(float(option[1]), float(option[2]));
+            reset_model!(float(option[1])*mph, float(option[2])*mins);
             for now in 1:hour
                 curr_time[] = now;
             end
@@ -662,7 +663,7 @@ end
 Makie.on(fig.scene.events.window_open) do status
     # If window just closed, reset for a new run
     if !fig.scene.events.window_open.val
-        reset_model!();
+        reset_model!(default_params...);
     end
 end
 
@@ -673,7 +674,7 @@ function run_record(filename)::Nothing
     end
     println("Evacuated: ", num_evacuated);
     println("Dead: ", num_dead);
-    reset_model!();
+    reset_model!(default_params...);
     nothing
 end
 
