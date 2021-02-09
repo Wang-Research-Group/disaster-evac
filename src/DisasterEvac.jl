@@ -17,8 +17,8 @@ include("parse_data.jl");
 
 const Agent = Agents.AbstractAgent;
 
-# Speed and min milling time, in mph and mins respectively
-default_params = (25, 0);
+# Speed and min milling time
+default_params = (25mph, 0mins);
 
 
 # Set up observables
@@ -334,7 +334,7 @@ function random_point()::Point
     rand() * (tsunamiʸ[end] - tsunamiʸ[1]) + tsunamiʸ[1])
 end
 
-ped_speed(s)::Float64 = 1.65*exp(-2.30*abs(s - 0.004));
+ped_speed(slope)::Float64 = 1.65*exp(-2.30*abs(slope - 0.004))*m/s;
 
 """
 Free road term of the IDM car following model.
@@ -473,7 +473,7 @@ function init_model(speed_limit, min_wait)::Agents.ABM
     model
 end
 
-init_model() = init_model(default_params[1]*mph, default_params[2]*mins);
+init_model() = init_model(default_params...);
 
 """
 Selects a shelter based on how far away it is and a provided distribution.
@@ -643,11 +643,11 @@ function run_no_gui(times, options)::Array{Tuple{Int,Int},1}
             push!(stats, (num_evacuated, num_dead));
         end
     end
-    reset_model!(default_params[1]*mph, default_params[2]*mins);
+    reset_model!(default_params...);
     stats
 end
 
-run_no_gui(times) = run_no_gui(times, [default_params]);
+run_no_gui(times) = run_no_gui(times, [(default_params[1]/mph, default_params[2]/mins)]);
 
 run_no_gui() = run_no_gui(1);
 
@@ -677,7 +677,7 @@ end
 Makie.on(fig.scene.events.window_open) do status
     # If window just closed, reset for a new run
     if !fig.scene.events.window_open.val
-        reset_model!(default_params[1]*mph, default_params[2]*mins);
+        reset_model!(default_params...);
     end
 end
 
@@ -688,7 +688,7 @@ function run_record(filename)::Nothing
     end
     println("Evacuated: ", num_evacuated);
     println("Dead: ", num_dead);
-    reset_model!(default_params[1]*mph, default_params[2]*mins);
+    reset_model!(default_params...);
     nothing
 end
 
