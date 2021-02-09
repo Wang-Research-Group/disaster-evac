@@ -17,6 +17,7 @@ include("parse_data.jl");
 
 const Agent = Agents.AbstractAgent;
 
+# Speed and min milling time, in mph and mins respectively
 default_params = (25, 0);
 
 
@@ -32,6 +33,7 @@ num_dead = 0;
 function set_filenames()
     filenames = Dict();
     filenames["network"] = "src/data/map.osm";
+    filenames["elevation"] = "src/data/elevation/elevation.asc";
     filenames["tsunami"] = "src/data/tsunami_inundation";
     filenames["people"] = "src/data/pop_coordinates.csv";
     filenames["shelters"] = "src/data/shelter_coordinates.csv";
@@ -43,7 +45,10 @@ filenames = set_filenames();
 
 network = Data.network(filenames["network"]);
 
-tsunamiˣ, tsunamiʸ, tsunamiᶻ, tsunami_offset = Data.tsunami_data(initial_time, half_mins, network, filenames["tsunami"]);
+Data.set_elevations!(network, filenames["elevation"]);
+slopes = Data.get_slopes(network);
+
+tsunamiˣ, tsunamiʸ, tsunamiᶻ = Data.tsunami_data(initial_time, half_mins, network, filenames["tsunami"]);
 minᶻ, maxᶻ = Data.tsunami_extrema();
 
 people = Data.people(filenames["people"]);
@@ -52,14 +57,15 @@ shelters = Data.shelters(network, filenames["shelters"]);
 
 function refresh_data()::Nothing
     data = Data.refresh_data(initial_time, half_mins,
-                             filenames["network"], filenames["tsunami"],
+                             filenames["network"], filenames["elevation"], filenames["tsunami"],
                              filenames["people"], filenames["shelters"]
     );
     network = data[1];
-    tsunamiˣ, tsunamiʸ, tsunamiᶻ, tsunami_offset = data[2];
-    minᶻ, maxᶻ = data[3];
-    people = data[4];
-    shelters = data[5];
+    slopes = data[2];
+    tsunamiˣ, tsunamiʸ, tsunamiᶻ = data[3];
+    minᶻ, maxᶻ = data[4];
+    people = data[5];
+    shelters = data[6];
     nothing
 end
 
@@ -261,6 +267,10 @@ function agent_step!(pedestrian::Pedestrian, model)::Nothing
             global num_evacuated += 1;
             return;
         end
+        # Update speed
+        road_slope = slopes[(pedestrian.dest[1], pedestrian.path[1][1])];
+        set_speed!(pedestrian, ped_speed(road_slope));
+
         next_dest!(pedestrian);
         face_dest!(pedestrian);
         update_time_remaining!(pedestrian);
@@ -323,6 +333,8 @@ function random_point()::Point
     (rand() * (tsunamiˣ[end] - tsunamiˣ[1]) + tsunamiˣ[1],
     rand() * (tsunamiʸ[end] - tsunamiʸ[1]) + tsunamiʸ[1])
 end
+
+ped_speed(s)::Float64 = 1.65*exp(-2.30*abs(s - 0.004));
 
 """
 Free road term of the IDM car following model.
@@ -461,7 +473,7 @@ function init_model(speed_limit, min_wait)::Agents.ABM
     model
 end
 
-init_model() = init_model(default_params...);
+init_model() = init_model(default_params[1]*mph, default_params[2]*mins);
 
 """
 Selects a shelter based on how far away it is and a provided distribution.
@@ -484,7 +496,6 @@ function new_resident(person, milling_time, model)::Resident
     id = Agents.nextid(model);
     #id = person.ID;
     #pos = random_point();
-    #pos = (person.X - tsunami_offset[1], person.Y - tsunami_offset[2]);
     pos = person.pos;
     #will_evac = person.Attribute_2;
     will_evac = person.evac;
@@ -509,13 +520,16 @@ Initialize a new pedestrian.
 """
 function new_pedestrian(resident_pos, model)::Pedestrian
     id = Agents.nextid(model);
-    speed = 5mph;
-    # Initialize pedestrian facing to the right
-    θ = 0;
-    vel = velocity(θ, speed);
     shelter = select_shelter(resident_pos[2], model.ped_shelter_distribution);
     path = get_path(resident_pos[1], shelter);
     dest = next_dest(path);
+
+    road_slope = slopes[(resident_pos[1], dest[1])];
+    speed = ped_speed(road_slope);
+
+    # Initialize pedestrian facing to the right
+    θ = 0;
+    vel = velocity(θ, speed);
     # resident_pos and dest format are (intersection ID, (x coord, y coord))
     pos = resident_pos[2];
     remaining_time = time_remaining(pos, dest, speed);
@@ -629,7 +643,7 @@ function run_no_gui(times, options)::Array{Tuple{Int,Int},1}
             push!(stats, (num_evacuated, num_dead));
         end
     end
-    reset_model!(default_params...);
+    reset_model!(default_params[1]*mph, default_params[2]*mins);
     stats
 end
 
@@ -663,7 +677,7 @@ end
 Makie.on(fig.scene.events.window_open) do status
     # If window just closed, reset for a new run
     if !fig.scene.events.window_open.val
-        reset_model!(default_params...);
+        reset_model!(default_params[1]*mph, default_params[2]*mins);
     end
 end
 
@@ -674,7 +688,7 @@ function run_record(filename)::Nothing
     end
     println("Evacuated: ", num_evacuated);
     println("Dead: ", num_dead);
-    reset_model!(default_params...);
+    reset_model!(default_params[1]*mph, default_params[2]*mins);
     nothing
 end
 

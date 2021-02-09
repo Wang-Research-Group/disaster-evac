@@ -1,6 +1,6 @@
 module Data
 
-export network, tsunami_data, tsunami_extrema, tsunami_resolution, people, shelters;
+export network, set_elevations!, get_slopes, tsunami_data, tsunami_extrema, tsunami_resolution, people, shelters;
 
 import OpenStreetMapX;
 import CSV;
@@ -19,10 +19,75 @@ end
 
 network(filename) = OSMX.get_map_data(filename, use_cache = false, trim_to_connected_graph = true);
 
+offset = nothing;
+
+# TODO: Break most of this into a separate function so it can be reused by both elevation and tsunami data
+function elev_data(network, filepath)
+    dataset = AG.readraster(filepath);
+
+    source = AG.importWKT(AG.getproj(dataset)); # For the elevation asc files, the projection is UTM
+    lla = AG.importEPSG(4326); # Lat-long
+    geotrans = AG.getgeotransform(dataset);
+
+    # Determine how far off the tsunami dataset origin is from the road network origin, as ENU/UTM
+    road_center = OSMX.center(network.bounds); # Lat-long of center of the road network, i.e., (0, 0) ENU
+    network_point = AG.createpoint(road_center.lat, road_center.lon);
+    AG.createcoordtrans(lla, source) do transform
+        AG.transform!(network_point, transform)
+    end
+    # Assume people and shelters are the same coordinate system as elevation data
+    global offset = (AG.getx(network_point, 0), AG.gety(network_point, 0));
+
+    missing_val = AG.getnodatavalue(AG.getband(dataset, 1));
+    # Determine coordinates in ENU with the same origin as the road network. UTM
+    # and ENU are both in meters, so no additional conversion needed
+    x_step, y_step = geotrans[2], -geotrans[6];
+    origin = (geotrans[1] - offset[1] + x_step,
+              geotrans[4] - offset[2] - y_step * size(dataset, 2));
+    # Replace the NaN value in the raw dataset (usually -9999) with NaN. Using
+    # NaN to keep it consistent with the tsunami data. Also flip the
+    # coordinates so it's not upside down (necessary because the asc files
+    # store coordinates with an origin of top left, not bottom left)
+    z = map(x -> x == missing_val ? NaN : x, reverse(dataset[:, :, 1], dims=2));
+    origin, z, x_step, y_step
+end
+
+function set_elevations!(network, filepath)
+    origin, elevᶻ, x_step, y_step = elev_data(network, filepath);
+    max_x_index = size(elevᶻ, 1);
+    max_y_index = size(elevᶻ, 2);
+    for (id, pos) in network.nodes
+        x_index::Int = floor((pos.east - origin[1]) / x_step) + 1;
+        y_index::Int = floor((pos.north - origin[2]) / y_step) + 1;
+        z = begin
+            if 1 ≤ x_index ≤ max_x_index && 1 ≤ y_index ≤ max_y_index
+                elevᶻ[x_index,y_index]
+            else
+                NaN
+            end
+        end
+        network.nodes[id] = OSMX.ENU(pos.east, pos.north, z);
+    end
+end
+
+function get_slopes(network)
+    Dict(map(network.e) do ids
+        i1 = network.nodes[ids[1]];
+        i2 = network.nodes[ids[2]];
+        rise = i2.up - i1.up;
+        run = OSMX.distance(i1, OSMX.ENU(i2.east, i2.north, i1.up));
+        slope = rise / run;
+        if isnan(slope)
+            slope = 0.0;
+        end
+        (ids, slope)
+    end)
+end
+
 # Get all of the tsunami inundation datasets as a dictionary;
 # key is filename besides extension, value is data
 datasets = Dict();
-geotransform, offset, missing_data_val = nothing, nothing, nothing;
+geotransform, missing_data_val = nothing, nothing;
 
 function tsunami_data(initial_time, half_mins, network, dir_name)
     ext = ".asc";
@@ -43,7 +108,7 @@ function tsunami_data(initial_time, half_mins, network, dir_name)
         AG.transform!(network_point, transform)
     end
     # Assume everything besides the road network is in UTM
-    global offset = (AG.getx(network_point, 0), AG.gety(network_point, 0));
+    tsunami_offset = (AG.getx(network_point, 0), AG.gety(network_point, 0));
 
     global missing_data_val = AG.getnodatavalue(AG.getband(datasets[string(initial_time)], 1));
     # Determine tsunami coordinates in ENU with the same origin as the road
@@ -55,7 +120,7 @@ function tsunami_data(initial_time, half_mins, network, dir_name)
         function tsunami_coord(dim, i)
             floats = Float64.(1:dim(datasets[string(initial_time)]));
             transform_order = i == 1 ? (floats, 1.0) : (1.0, floats);
-            map(x -> x[i], AG.applygeotransform.(tuple(geotransform), transform_order...)) .- offset[i]
+            map(x -> x[i], AG.applygeotransform.(tuple(geotransform), transform_order...)) .- tsunami_offset[i]
         end
         tsunami_coord(AG.width, 1), reverse(tsunami_coord(AG.height, 2))
     end
@@ -65,7 +130,7 @@ function tsunami_data(initial_time, half_mins, network, dir_name)
     # store coordinates with an origin of top left, not bottom left)
     # Use half-mins because that's the interval of the tsunami data
     z = Makie.@lift(map(x -> x == missing_data_val ? NaN : x, reverse(datasets[string($half_mins * 30)][:, :, 1], dims=2)));
-    x, y, z, offset
+    x, y, z
 end
 
 function tsunami_resolution()::NTuple{2,Float64}
@@ -96,9 +161,11 @@ function shelters(network, filename)
     for shelter in shelter_locs]
 end
 
-function refresh_data(initial_time, half_mins, network_loc, tsunami_loc, people_loc, shelters_loc)
+function refresh_data(initial_time, half_mins, network_loc, elev_loc, tsunami_loc, people_loc, shelters_loc)
     new_network = network(network_loc);
+    set_elevations!(new_network, elev_loc);
     new_network,
+    get_slopes(new_network),
     tsunami_data(initial_time, half_mins, new_network, tsunami_loc),
     tsunami_extrema(),
     people(people_loc),
