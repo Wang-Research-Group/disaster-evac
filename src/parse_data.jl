@@ -29,7 +29,7 @@ function elev_data(network, filepath)
     lla = AG.importEPSG(4326); # Lat-long
     geotrans = AG.getgeotransform(dataset);
 
-    # Determine how far off the tsunami dataset origin is from the road network origin, as ENU/UTM
+    # Determine how far off the dataset origin is from the road network origin, as ENU/UTM
     road_center = OSMX.center(network.bounds); # Lat-long of center of the road network, i.e., (0, 0) ENU
     network_point = AG.createpoint(road_center.lat, road_center.lon);
     AG.createcoordtrans(lla, source) do transform
