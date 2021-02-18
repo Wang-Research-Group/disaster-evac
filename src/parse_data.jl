@@ -17,7 +17,10 @@ struct Person
     evac::Bool
 end
 
-network(filename) = OSMX.get_map_data(filename, use_cache = false, trim_to_connected_graph = true);
+function network(filename)
+    net = OSMX.get_map_data(filename, use_cache = false, trim_to_connected_graph = true);
+    net, Dict((seg.node0, seg.node1) => seg.nodes for seg in OSMX.find_segments(net.nodes, net.roadways, net.intersections))
+end
 
 offset = nothing;
 
@@ -70,8 +73,8 @@ function set_elevations!(network, filepath)
     end
 end
 
-function get_slopes(network)
-    Dict(map(network.e) do ids
+function get_slopes(network, segments)
+    Dict(map(Iterators.flatten(map(seg -> zip(seg, seg[2:end]), values(segments)))) do ids
         i1 = network.nodes[ids[1]];
         i2 = network.nodes[ids[2]];
         rise = i2.up - i1.up;
@@ -137,11 +140,15 @@ function tsunami_resolution()::NTuple{2,Float64}
     geotransform[2], -geotransform[6]
 end
 
+"""
+Find minimum and maximum z values of the tsunami for heatmap normalization.
+This can probably be done with `extrema()`, but it's nested so it's
+complicated (and it's only computed once, unlike most calculations here)
+"""
 function tsunami_extrema()::NTuple{2,Float64}
-    # Find minimum and maximum z values of the tsunami for heatmap normalization.
-    # This can probably be done with `extrema()`, but it's nested so it's
-    # complicated (and it's only computed once, unlike most calculations here)
-    minᶻ = minimum(x -> minimum(filter(z -> z != missing_data_val, x[:, :, 1])), values(datasets));
+    #minᶻ = minimum(x -> minimum(filter(z -> z != missing_data_val, x[:, :, 1])), values(datasets));
+    # Use a min of 0 so ground level is white on the heatmap
+    minᶻ = 0.0;
     maxᶻ = maximum(x -> maximum(filter(z -> z != missing_data_val, x[:, :, 1])), values(datasets));
     minᶻ, maxᶻ
 end
@@ -162,10 +169,10 @@ function shelters(network, filename)
 end
 
 function refresh_data(initial_time, half_mins, network_loc, elev_loc, tsunami_loc, people_loc, shelters_loc)
-    new_network = network(network_loc);
+    new_network, network_segments = network(network_loc);
     set_elevations!(new_network, elev_loc);
     new_network,
-    get_slopes(new_network),
+    get_slopes(new_network, network_segments),
     tsunami_data(initial_time, half_mins, new_network, tsunami_loc),
     tsunami_extrema(),
     people(people_loc),

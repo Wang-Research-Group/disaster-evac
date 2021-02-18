@@ -43,10 +43,10 @@ end
 filenames = set_filenames();
 
 
-network = Data.network(filenames["network"]);
+network, network_segments = Data.network(filenames["network"]);
 
 Data.set_elevations!(network, filenames["elevation"]);
-slopes = Data.get_slopes(network);
+slopes = Data.get_slopes(network, network_segments);
 
 tsunamiˣ, tsunamiʸ, tsunamiᶻ = Data.tsunami_data(initial_time, half_mins, network, filenames["tsunami"]);
 minᶻ, maxᶻ = Data.tsunami_extrema();
@@ -152,10 +152,10 @@ end
 """
 Determine the shortest path to the shelter.
 """
-function get_path(curr_node, safety_node)::Array{Tuple{Int64,Point},1}
+function get_path(curr_node, safety_node, segments)::Array{Tuple{Int64,Point},1}
     # Only the node IDs
-    node_path = OSMX.shortest_route(network, curr_node, safety_node)[1][2:end];
-    map(x -> (x, enu_to_tuple(network.nodes[x])), node_path)
+    node_path = OSMX.shortest_route(network, curr_node, safety_node)[1];
+    map(x -> (x, enu_to_tuple(network.nodes[x])), Iterators.flatten(map(i -> segments[i][2:end], zip(node_path, node_path[2:end]))))
 end
 
 """
@@ -521,7 +521,7 @@ Initialize a new pedestrian.
 function new_pedestrian(resident_pos, model)::Pedestrian
     id = Agents.nextid(model);
     shelter = select_shelter(resident_pos[2], model.ped_shelter_distribution);
-    path = get_path(resident_pos[1], shelter);
+    path = get_path(resident_pos[1], shelter, network_segments);
     dest = next_dest(path);
 
     road_slope = slopes[(resident_pos[1], dest[1])];
@@ -549,7 +549,7 @@ function new_car(resident_pos, model)::Car
     θ = 0;
     vel = velocity(θ, speed);
     shelter = select_shelter(resident_pos[2], model.car_shelter_distribution);
-    path = get_path(resident_pos[1], shelter);
+    path = get_path(resident_pos[1], shelter, network_segments);
     dest = next_dest(path);
     # resident_pos and dest format are (intersection ID, (x coord, y coord))
     car = Car(id, resident_pos[2], vel, θ, speed, dest, path, true, nothing, nothing, true);
@@ -597,8 +597,8 @@ Makie.linkaxes!(evac_plot, death_plot);
 button = fig[0, :] = Makie.Button(fig; label = "Start/Stop");
 button.tellwidth = false;
 
-edges = map(p -> (enu_to_tuple(network.nodes[p[1]]), enu_to_tuple(network.nodes[p[2]])), network.e);
-Makie.linesegments!(simulation, edges);
+lines = collect(Iterators.flatten(map(seg -> vcat(map(x -> enu_to_tuple(network.nodes[x]), seg), [(NaN, NaN)]), values(network_segments))));
+Makie.lines!(simulation, lines);
 
 # Render a heatmap
 Makie.heatmap!(simulation, tsunamiˣ, tsunamiʸ, tsunamiᶻ; colormap = :GnBu_9, colorrange = (minᶻ, maxᶻ));
