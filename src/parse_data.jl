@@ -18,6 +18,13 @@ struct Person
     evac::Bool
 end
 
+struct Shelter
+    id::Int
+    node_id::Int
+    pos::Point
+    inundated::Bool
+end
+
 function network(filename)
     net = OSMX.get_map_data(filename, use_cache = false, trim_to_connected_graph = true);
     net, Dict((seg.node0, seg.node1) => seg.nodes for seg in OSMX.find_segments(net.nodes, net.roadways, net.intersections))
@@ -161,12 +168,13 @@ function people(filename)
 end
 
 function shelters(network, filename)
+    shelter_dict = Dict();
     shelter_locs = CSV.File(filename; normalizenames = true, types = [Int, Float64, Float64]); # Shelter locations
-    [begin
+    for shelter in shelter_locs
         node_id = OSMX.nearest_node(network, OSMX.ENU(shelter.x - offset[1], shelter.y - offset[2]));
-        (node_id, enu_to_tuple(network.nodes[node_id]))
+        shelter_dict[shelter.ID] = Shelter(shelter.ID, node_id, enu_to_tuple(network.nodes[node_id]), false);
     end
-    for shelter in shelter_locs]
+    shelter_dict
 end
 
 function refresh_data(initial_time, half_mins, network_loc, elev_loc, tsunami_loc, people_loc, shelters_loc)

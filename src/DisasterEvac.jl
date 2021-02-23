@@ -155,9 +155,9 @@ end
 """
 Determine the shortest path to the shelter.
 """
-function get_path(curr_node, safety_node, segments)::Array{Tuple{Int64,Point},1}
+function get_path(curr_node, shelter, segments)::Array{Tuple{Int64,Point},1}
     # Only the node IDs
-    node_path = OSMX.shortest_route(network, curr_node, safety_node)[1];
+    node_path = OSMX.shortest_route(network, curr_node, shelters[shelter].node_id)[1];
     map(x -> (x, enu_to_tuple(network.nodes[x])), Iterators.flatten(map(i -> segments[i][2:end], zip(node_path, node_path[2:end]))))
 end
 
@@ -229,8 +229,9 @@ function agent_step!(resident::Resident, model)::Nothing
     end
     if resident.time_remaining ≤ 0
         # On the off-chance the intersection is safety
-        if resident.dest[1] ∈ map(shelter -> shelter[1], shelters)
-            push!(evacuated, (resident.ext_id, resident.dest[2]));
+        shelter_id = findfirst(shelter -> shelter.node_id == resident.dest[1], shelters);
+        if !isnothing(shelter_id)
+            push!(evacuated, (resident.ext_id, shelter_id));
             Agents.kill_agent!(resident, model);
             return;
         end
@@ -266,7 +267,7 @@ function agent_step!(pedestrian::Pedestrian, model)::Nothing
         pedestrian.pos = pedestrian.dest[2];
         if isempty(pedestrian.path)
             # Reached safety
-            push!(evacuated, (pedestrian.ext_id, pedestrian.dest[2]));
+            push!(evacuated, (pedestrian.ext_id, shelter_at_node(pedestrian.dest[1])));
             Agents.kill_agent!(pedestrian, model);
             return;
         end
@@ -304,7 +305,7 @@ function agent_step!(car::Car, model)::Nothing
         end
         if isempty(car.path)
             # Reached safety
-            push!(evacuated, (car.ext_id, car.dest[2]));
+            push!(evacuated, (car.ext_id, shelter_at_node(car.dest[1])));
             Agents.kill_agent!(car, model);
             return;
         end
@@ -437,6 +438,10 @@ function update_time_remaining!(a::Agent)::Nothing
     nothing
 end
 
+function shelter_at_node(n)
+    findfirst(x -> x.node_id == n, shelters)
+end
+
 """
 Initialize the model.
 """
@@ -482,14 +487,15 @@ init_model() = init_model(default_params...);
 Selects a shelter based on how far away it is and a provided distribution.
 """
 function select_shelter(pos::Point, distribution)::Int64
+    shelter_ids = collect(keys(shelters));
     # Plug in the distance to each shelter to the distribution
-    Y = Distributions.pdf.(distribution, dist.(tuple(pos), map(x -> x[2], shelters)));
+    Y = Distributions.pdf.(distribution, dist.(tuple(pos), map(x -> x.pos, values(shelters))));
     # Normalize based on Luce's choice axiom
     shelter_probs = Y ./ sum(Y); # Softmax function; don't need exp because they're already probabilities
     # Sum the probabilities so they go from 0-1
     cumsum!(shelter_probs, shelter_probs);
     # Determine the index the random number would fall between, then return the corresponding shelter ID
-    shelters[searchsortedfirst(shelter_probs, rand())][1]
+    shelter_ids[searchsortedfirst(shelter_probs, rand())]
 end
 
 """
@@ -614,7 +620,7 @@ Makie.limits!(evac_plot, 0, 60, 0, num_residents);
 Makie.scatter!(death_plot, death_list);
 Makie.limits!(death_plot, 0, 60, 0, num_residents);
 
-Makie.scatter!(simulation, [shelter[2] for shelter in shelters]; color = :blue);
+Makie.scatter!(simulation, [shelter.pos for shelter in values(shelters)]; color = :blue);
 
 simulation.aspect = Makie.DataAspect();
 Makie.hidedecorations!(simulation);
