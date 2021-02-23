@@ -18,7 +18,8 @@ include("parse_data.jl");
 const Agent = Agents.AbstractAgent;
 
 # Speed and min milling time
-default_params = (25mph, 0mins);
+const default_params = (25mph, 0mins);
+const death_threshold = 0.5m;
 
 
 # Set up observables
@@ -211,7 +212,7 @@ function tsunami_killed!(agent::Agent)::Bool
     if !agent.alive
         return true;
     end
-    if tsunami_height(agent.pos) ≥ 0.5m
+    if tsunami_height(agent.pos) ≥ death_threshold
         set_speed!(agent, 0.0);
         agent.alive = false;
         push!(dead, (agent.ext_id, agent.pos));
@@ -321,9 +322,23 @@ function agent_step!(car::Car, model)::Nothing
 end
 
 """
-Actuates before `agent_step!`; used for setting the car following parameters.
+Actuates before `agent_step!`; used for checking for flooded shelters and
+setting the car following parameters.
 """
 function model_step!(model)::Nothing
+    for (id, shelter) ∈ shelters
+        if tsunami_height(shelter.pos) ≥ death_threshold
+            shelter.inundated = true;
+            had_evacuated = findall(x -> x[2] == id, evacuated);
+            # Remove dead from evacuated
+            now_dead = popat!.(tuple(evacuated), reverse(had_evacuated)); # Have to reverse so popping uses correct indices
+            # Add to dead
+            push!(dead, map(x -> (x[1], shelter.pos), now_dead)...);
+        else
+            shelter.inundated = false;
+        end
+    end
+
     for car ∈ collect(values(filter(p -> p.second isa Car, model.agents)))
         update_speed!(car, model);
     end
