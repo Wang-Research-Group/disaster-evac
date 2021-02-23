@@ -13,6 +13,7 @@ include("utilities.jl");
 using .Utils;
 
 struct Person
+    id::Int
     pos::Point
     evac::Bool
 end
@@ -155,7 +156,7 @@ end
 
 function people(filename)
     map(CSV.File(filename; normalizenames = true, types = [Int, Float64, Float64, Float64, Bool])) do p
-        Person((p.X - offset[1], p.Y - offset[2]), p.Attribute_2)
+        Person(p.ID, (p.X - offset[1], p.Y - offset[2]), p.Attribute_2)
     end
 end
 

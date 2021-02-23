@@ -27,8 +27,8 @@ curr_time = Makie.Node{Int}(initial_time); # Value in frames
 half_mins = Makie.Node{Int}(floor(initial_time / 30s)); # Value rounded down in half-minutes
 
 # Set up stats
-num_evacuated = 0;
-num_dead = 0;
+evacuated = [];
+dead = [];
 
 function set_filenames()
     filenames = Dict();
@@ -83,13 +83,14 @@ mutable struct Resident <: Agent
     alive::Bool
     time_remaining::Int # Number of frames remaining until destination
     milling::Float64 # The amount of time the resident waits until leaving (frames)
+    ext_id::Int # External ID, used for results
 end
 
 """
 Initializes a `Resident` if they will never evacuate; several attributes become irrelevant.
 """
-function Resident(id, pos, θ, alive)::Resident
-    Resident(id, pos, (0.0, 0.0), θ, 0.0, (0, (0.0, 0.0)), false, alive, typemax(Int), Inf)
+function Resident(id, pos, θ, alive, ext_id)::Resident
+    Resident(id, pos, (0.0, 0.0), θ, 0.0, (0, (0.0, 0.0)), false, alive, typemax(Int), Inf, ext_id)
 end
 
 mutable struct Pedestrian <: Agent
@@ -102,6 +103,7 @@ mutable struct Pedestrian <: Agent
     path::Array{Tuple{Int64,Point},1}
     alive::Bool
     time_remaining::Int # Number of frames remaining until destination
+    ext_id::Int # External ID, used for results
 end
 
 mutable struct Car <: Agent
@@ -116,6 +118,7 @@ mutable struct Car <: Agent
     ahead::Union{Nothing,Car} # The car ahead
     behind::Union{Nothing,Car} # The car behind (used for optimizations)
     update_ahead::Bool # If the car ahead needs to be updated (used for optimizations)
+    ext_id::Int # External ID, used for results
 end
 
 """
@@ -211,7 +214,7 @@ function tsunami_killed!(agent::Agent)::Bool
     if tsunami_height(agent.pos) ≥ 0.5m
         set_speed!(agent, 0.0);
         agent.alive = false;
-        global num_dead += 1;
+        push!(dead, (agent.ext_id, agent.pos));
         return true;
     end
     false
@@ -227,16 +230,16 @@ function agent_step!(resident::Resident, model)::Nothing
     if resident.time_remaining ≤ 0
         # On the off-chance the intersection is safety
         if resident.dest[1] ∈ map(shelter -> shelter[1], shelters)
+            push!(evacuated, (resident.ext_id, resident.dest[2]));
             Agents.kill_agent!(resident, model);
-            global num_evacuated += 1;
             return;
         end
         # Kill the resident, replace with a car or pedestrian
         new_agent_type = rand((Car, Pedestrian));
         new_agent = if new_agent_type == Pedestrian
-            new_pedestrian(resident.dest, model)
+            new_pedestrian(resident.ext_id, resident.dest, model)
         else
-            new_car(resident.dest, model)
+            new_car(resident.ext_id, resident.dest, model)
         end
         Agents.kill_agent!(resident, model);
         Agents.add_agent_pos!(new_agent, model);
@@ -263,8 +266,8 @@ function agent_step!(pedestrian::Pedestrian, model)::Nothing
         pedestrian.pos = pedestrian.dest[2];
         if isempty(pedestrian.path)
             # Reached safety
+            push!(evacuated, (pedestrian.ext_id, pedestrian.dest[2]));
             Agents.kill_agent!(pedestrian, model);
-            global num_evacuated += 1;
             return;
         end
         # Update speed
@@ -301,8 +304,8 @@ function agent_step!(car::Car, model)::Nothing
         end
         if isempty(car.path)
             # Reached safety
+            push!(evacuated, (car.ext_id, car.dest[2]));
             Agents.kill_agent!(car, model);
-            global num_evacuated += 1;
             return;
         end
         next_dest!(car);
@@ -494,7 +497,7 @@ Initialize a new resident.
 """
 function new_resident(person, milling_time, model)::Resident
     id = Agents.nextid(model);
-    #id = person.ID;
+    ext_id = person.id;
     #pos = random_point();
     pos = person.pos;
     #will_evac = person.Attribute_2;
@@ -507,9 +510,9 @@ function new_resident(person, milling_time, model)::Resident
         dest_id = OSMX.nearest_node(network, OSMX.ENU(pos...));
         dest = (dest_id, enu_to_tuple(network.nodes[dest_id]));
         remaining_time = time_remaining(pos, dest, speed);
-        Resident(id, pos, vel, θ, speed, dest, false, true, remaining_time, milling_time)
+        Resident(id, pos, vel, θ, speed, dest, false, true, remaining_time, milling_time, ext_id)
     else
-        Resident(id, pos, θ, true)
+        Resident(id, pos, θ, true, ext_id)
     end
     face_dest!(resident);
     resident
@@ -518,7 +521,7 @@ end
 """
 Initialize a new pedestrian.
 """
-function new_pedestrian(resident_pos, model)::Pedestrian
+function new_pedestrian(ext_id, resident_pos, model)::Pedestrian
     id = Agents.nextid(model);
     shelter = select_shelter(resident_pos[2], model.ped_shelter_distribution);
     path = get_path(resident_pos[1], shelter, network_segments);
@@ -533,7 +536,7 @@ function new_pedestrian(resident_pos, model)::Pedestrian
     # resident_pos and dest format are (intersection ID, (x coord, y coord))
     pos = resident_pos[2];
     remaining_time = time_remaining(pos, dest, speed);
-    pedestrian = Pedestrian(id, pos, vel, θ, speed, dest, path, true, remaining_time);
+    pedestrian = Pedestrian(id, pos, vel, θ, speed, dest, path, true, remaining_time, ext_id);
     # Turn to face the next intersection
     face_dest!(pedestrian);
     pedestrian
@@ -542,7 +545,7 @@ end
 """
 Initialize a new car.
 """
-function new_car(resident_pos, model)::Car
+function new_car(ext_id, resident_pos, model)::Car
     id = Agents.nextid(model);
     speed = model.speed_limit;
     # Initialize car facing to the right
@@ -552,7 +555,7 @@ function new_car(resident_pos, model)::Car
     path = get_path(resident_pos[1], shelter, network_segments);
     dest = next_dest(path);
     # resident_pos and dest format are (intersection ID, (x coord, y coord))
-    car = Car(id, resident_pos[2], vel, θ, speed, dest, path, true, nothing, nothing, true);
+    car = Car(id, resident_pos[2], vel, θ, speed, dest, path, true, nothing, nothing, true, ext_id);
     # Turn to face the next intersection
     face_dest!(car);
     car
@@ -569,8 +572,8 @@ agent_list = Makie.lift(curr_time; typ = Array{Tuple{Tuple{Float64,Float64},Symb
     # Things to do on every frame
     minute = convert(Int, mins); # Make sure a minute can be evenly divided by frames
     if now % minute == 0
-        evac_list[] = push!(evac_list[], (now / minute, num_evacuated));
-        death_list[] = push!(death_list[], (now / minute, num_dead));
+        evac_list[] = push!(evac_list[], (now / minute, length(evacuated)));
+        death_list[] = push!(death_list[], (now / minute, length(dead)));
     end
     curr_half_mins::Int = floor(now / 30s);
     # Need to do a conditional because we don't want the observable to trigger unless it's a new value
@@ -620,13 +623,13 @@ function reset_model!(speed_limit, min_wait)::Nothing
     global model = init_model(speed_limit, min_wait);
     curr_time[] = initial_time;
     evac_list[] = [(0, 0)];
-    global num_evacuated = 0;
+    global evacuated = [];
     death_list[] = [(0, 0)];
-    global num_dead = 0;
+    global dead = [];
     nothing
 end
 
-function run_no_gui(times, options)::Array{Tuple{Int,Int},1}
+function run_no_gui(times, options)
     # Interpreting options as mph and mins
     hour = convert(Int, hr);
     stats = [];
@@ -638,9 +641,9 @@ function run_no_gui(times, options)::Array{Tuple{Int,Int},1}
             for now in 1:hour
                 curr_time[] = now;
             end
-            println("Evacuated: ", num_evacuated);
-            println("Dead: ", num_dead);
-            push!(stats, (num_evacuated, num_dead));
+            println("Evacuated: ", length(evacuated));
+            println("Dead: ", length(dead));
+            push!(stats, (evacuated, dead));
         end
     end
     reset_model!(default_params...);
@@ -666,8 +669,8 @@ Makie.on(button.clicks) do click
             curr_time[] = now;
             sleep(.0001); # Needed so the frame can render
             if now == hour
-                println("Evacuated: ", num_evacuated);
-                println("Dead: ", num_dead);
+                println("Evacuated: ", length(evacuated));
+                println("Dead: ", length(dead));
                 button.clicks[] = 0;
             end
         end
@@ -686,8 +689,8 @@ function run_record(filename)::Nothing
     Makie.record(fig, filename, 1:hour; framerate = 60) do t
         curr_time[] = t;
     end
-    println("Evacuated: ", num_evacuated);
-    println("Dead: ", num_dead);
+    println("Evacuated: ", length(evacuated));
+    println("Dead: ", length(dead));
     reset_model!(default_params...);
     nothing
 end
