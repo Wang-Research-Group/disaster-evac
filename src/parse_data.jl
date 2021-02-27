@@ -18,7 +18,7 @@ struct Person
     evac::Bool
 end
 
-struct Shelter
+mutable struct Shelter
     id::Int
     node_id::Int
     pos::Point

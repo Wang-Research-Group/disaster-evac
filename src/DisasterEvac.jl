@@ -17,9 +17,8 @@ include("parse_data.jl");
 
 const Agent = Agents.AbstractAgent;
 
-# Speed and min milling time
-const default_params = (25mph, 0mins);
-const death_threshold = 0.5m;
+# Speed, min milling time, and chance of pedestrian vs car
+const default_params = (25mph, 0mins, 0.5);
 
 
 # Set up observables
@@ -102,6 +101,7 @@ mutable struct Pedestrian <: Agent
     speed::Float64
     dest::Tuple{Int64,Point} # (Intersection ID, (x coord, y coord))
     path::Array{Tuple{Int64,Point},1}
+    rerouting::Bool
     alive::Bool
     time_remaining::Int # Number of frames remaining until destination
     ext_id::Int # External ID, used for results
@@ -115,6 +115,7 @@ mutable struct Car <: Agent
     speed::Float64
     dest::Tuple{Int64,Point} # (Intersection ID, (x coord, y coord))
     path::Array{Tuple{Int64,Point},1}
+    rerouting::Bool
     alive::Bool
     ahead::Union{Nothing,Car} # The car ahead
     behind::Union{Nothing,Car} # The car behind (used for optimizations)
@@ -146,6 +147,27 @@ Angle between the agent and its destination.
 dest_θ(a::Agent)::Float64 = Utils.angle(a.pos, a.dest[2]);
 
 """
+Node ID that the agent is currently at (returns `nothing` if it's not at one).
+"""
+at_id(a::Agent) = findfirst(x -> x == a.pos, network.nodes);
+
+"""
+Next intersection in the agent's path.
+"""
+function next_intersection(a::Agent)
+    poss_nodes = [a.dest, a.path...];
+    poss_nodes[findfirst(in(keys(network.intersections)), map(x -> x[1], poss_nodes))]
+end
+
+"""
+Adjacent intersections to the current one. Ignores default but returns it if there aren't any others.
+"""
+function adj_inter(node, default)
+    nearby = filter(x -> x ≠ default, network.intersections[node]);
+    isempty(nearby) ? Set([default]) : nearby
+end
+
+"""
 Make the agent face its destination.
 """
 function face_dest!(a::Agent)::Nothing
@@ -154,11 +176,11 @@ function face_dest!(a::Agent)::Nothing
 end
 
 """
-Determine the shortest path to the shelter.
+Determine the shortest path to the node.
 """
-function get_path(curr_node, shelter, segments)::Array{Tuple{Int64,Point},1}
+function get_path(curr_node, node, segments)::Array{Tuple{Int64,Point},1}
     # Only the node IDs
-    node_path = OSMX.shortest_route(network, curr_node, shelters[shelter].node_id)[1];
+    node_path = OSMX.shortest_route(network, curr_node, node)[1];
     map(x -> (x, enu_to_tuple(network.nodes[x])), Iterators.flatten(map(i -> segments[i][2:end], zip(node_path, node_path[2:end]))))
 end
 
@@ -212,7 +234,7 @@ function tsunami_killed!(agent::Agent)::Bool
     if !agent.alive
         return true;
     end
-    if tsunami_height(agent.pos) ≥ death_threshold
+    if flooded(agent.pos)
         set_speed!(agent, 0.0);
         agent.alive = false;
         push!(dead, (agent.ext_id, agent.pos));
@@ -222,12 +244,37 @@ function tsunami_killed!(agent::Agent)::Bool
 end
 
 """
+Check if the point is inundated above the death threshold
+"""
+flooded(pos::Point)::Bool = tsunami_height(pos) ≥ 0.5m;
+
+function check_reroute!(a::Union{Pedestrian,Car})
+    next_inter = next_intersection(a);
+    id = at_id(a);
+    if id ∈ keys(network.intersections) && flooded(next_inter[2])
+        a.rerouting = true;
+        # Reroute to a new intersection
+        a.path = get_path(id, rand(adj_inter(id, next_inter[1])), network_segments);
+        next_dest!(a);
+        face_dest!(a);
+    end
+end
+
+function done_rerouting!(a::Union{Pedestrian,Car}, dist)
+    a.rerouting = false;
+    # Find new shelter destination, update path
+    shelter = select_shelter(a.pos, dist);
+    a.path = get_path(at_id(a), shelters[shelter].node_id, network_segments);
+end
+
+"""
 Advance the step of a resident.
 """
 function agent_step!(resident::Resident, model)::Nothing
     if tsunami_killed!(resident) || curr_time.val < resident.milling
         return; # Done with the function
     end
+    # If reached intersection
     if resident.time_remaining ≤ 0
         # On the off-chance the intersection is safety
         shelter_id = findfirst(shelter -> shelter.node_id == resident.dest[1], shelters);
@@ -237,7 +284,7 @@ function agent_step!(resident::Resident, model)::Nothing
             return;
         end
         # Kill the resident, replace with a car or pedestrian
-        new_agent_type = rand((Car, Pedestrian));
+        new_agent_type = rand() ≤ model.mode ? Pedestrian : Car;
         new_agent = if new_agent_type == Pedestrian
             new_pedestrian(resident.ext_id, resident.dest, model)
         else
@@ -260,33 +307,42 @@ end
 """
 Advance the step of a pedestrian.
 """
-function agent_step!(pedestrian::Pedestrian, model)::Nothing
-    if tsunami_killed!(pedestrian)
+function agent_step!(ped::Pedestrian, model)::Nothing
+    if tsunami_killed!(ped)
         return; # Done with the function
     end
-    if pedestrian.time_remaining ≤ 0
-        pedestrian.pos = pedestrian.dest[2];
-        if isempty(pedestrian.path)
+    # If reached intersection or bend in the road
+    if ped.time_remaining ≤ 0
+        ped.pos = ped.dest[2];
+        if !ped.rerouting && isempty(ped.path)
             # Reached safety
-            push!(evacuated, (pedestrian.ext_id, shelter_at_node(pedestrian.dest[1])));
-            Agents.kill_agent!(pedestrian, model);
+            push!(evacuated, (ped.ext_id, shelter_at_node(ped.dest[1])));
+            Agents.kill_agent!(ped, model);
             return;
         end
         # Update speed
-        road_slope = slopes[(pedestrian.dest[1], pedestrian.path[1][1])];
-        set_speed!(pedestrian, ped_speed(road_slope));
+        road_slope = slopes[(ped.dest[1], ped.path[1][1])];
+        set_speed!(ped, ped_speed(road_slope));
 
-        next_dest!(pedestrian);
-        face_dest!(pedestrian);
-        update_time_remaining!(pedestrian);
+        # If finished rerouting
+        if ped.rerouting && isempty(ped.path)
+            done_rerouting(ped, model.ped_shelter_distribution);
+        end
+
+        next_dest!(ped);
+        face_dest!(ped);
+
+        check_reroute!(ped);
+
+        update_time_remaining!(ped);
         # If the next intersection is very close, just jump to that instead of a standard move
-        if pedestrian.time_remaining ≤ 0
-            pedestrian.pos = pedestrian.dest[2];
+        if ped.time_remaining ≤ 0
+            ped.pos = ped.dest[2];
             return;
         end
     end
-    Agents.move_agent!(pedestrian, model);
-    pedestrian.time_remaining -= 1;
+    Agents.move_agent!(ped, model);
+    ped.time_remaining -= 1;
     nothing
 end
 
@@ -297,6 +353,7 @@ function agent_step!(car::Car, model)::Nothing
     if tsunami_killed!(car)
         return; # Done with the function
     end
+    # If reached intersection or bend in the road
     if dist(car.pos, car.dest[2]) ≤ discrete_err(car)
         # Since speed was already updated, don't have to worry about a vehicle in front
         car.pos = car.dest[2];
@@ -304,14 +361,23 @@ function agent_step!(car::Car, model)::Nothing
         if !isnothing(car.behind)
             car.behind.ahead = nothing;
         end
-        if isempty(car.path)
+        if !car.rerouting && isempty(car.path)
             # Reached safety
             push!(evacuated, (car.ext_id, shelter_at_node(car.dest[1])));
             Agents.kill_agent!(car, model);
             return;
         end
+
+        # If finished rerouting
+        if car.rerouting && isempty(car.path)
+            done_rerouting!(car, model.car_shelter_distribution);
+        end
+
         next_dest!(car);
         face_dest!(car);
+
+        check_reroute!(car);
+
         # During the next decision-making process, update car ahead
         car.update_ahead = true;
         # Since the car jumped to the intersection, don't make a move as well
@@ -327,7 +393,7 @@ setting the car following parameters.
 """
 function model_step!(model)::Nothing
     for (id, shelter) ∈ shelters
-        if tsunami_height(shelter.pos) ≥ death_threshold
+        if flooded(shelter.pos)
             shelter.inundated = true;
             had_evacuated = findall(x -> x[2] == id, evacuated);
             # Remove dead from evacuated
@@ -453,14 +519,12 @@ function update_time_remaining!(a::Agent)::Nothing
     nothing
 end
 
-function shelter_at_node(n)
-    findfirst(x -> x.node_id == n, shelters)
-end
+shelter_at_node(n)::Int = findfirst(x -> x.node_id == n, shelters);
 
 """
 Initialize the model.
 """
-function init_model(speed_limit, min_wait)::Agents.ABM
+function init_model(speed_limit, min_wait, mode)::Agents.ABM
     space = Agents.ContinuousSpace(2; periodic = false); # 2D space
 
     properties = Dict();
@@ -470,6 +534,9 @@ function init_model(speed_limit, min_wait)::Agents.ABM
 
     # Set all road speed limits in mph
     properties[:speed_limit] = speed_limit;
+
+    # Set percent chance of a pedestrian vs a car
+    properties[:mode] = mode;
 
     # Resident needs to go last in each step, otherwise when they transform the agent will get an extra movement
     model = Agents.AgentBasedModel(
@@ -545,7 +612,7 @@ Initialize a new pedestrian.
 function new_pedestrian(ext_id, resident_pos, model)::Pedestrian
     id = Agents.nextid(model);
     shelter = select_shelter(resident_pos[2], model.ped_shelter_distribution);
-    path = get_path(resident_pos[1], shelter, network_segments);
+    path = get_path(resident_pos[1], shelters[shelter].node_id, network_segments);
     dest = next_dest(path);
 
     road_slope = slopes[(resident_pos[1], dest[1])];
@@ -557,7 +624,7 @@ function new_pedestrian(ext_id, resident_pos, model)::Pedestrian
     # resident_pos and dest format are (intersection ID, (x coord, y coord))
     pos = resident_pos[2];
     remaining_time = time_remaining(pos, dest, speed);
-    pedestrian = Pedestrian(id, pos, vel, θ, speed, dest, path, true, remaining_time, ext_id);
+    pedestrian = Pedestrian(id, pos, vel, θ, speed, dest, path, false, true, remaining_time, ext_id);
     # Turn to face the next intersection
     face_dest!(pedestrian);
     pedestrian
@@ -573,10 +640,10 @@ function new_car(ext_id, resident_pos, model)::Car
     θ = 0;
     vel = velocity(θ, speed);
     shelter = select_shelter(resident_pos[2], model.car_shelter_distribution);
-    path = get_path(resident_pos[1], shelter, network_segments);
+    path = get_path(resident_pos[1], shelters[shelter].node_id, network_segments);
     dest = next_dest(path);
     # resident_pos and dest format are (intersection ID, (x coord, y coord))
-    car = Car(id, resident_pos[2], vel, θ, speed, dest, path, true, nothing, nothing, true, ext_id);
+    car = Car(id, resident_pos[2], vel, θ, speed, dest, path, false, true, nothing, nothing, true, ext_id);
     # Turn to face the next intersection
     face_dest!(car);
     car
@@ -640,8 +707,8 @@ Makie.scatter!(simulation, [shelter.pos for shelter in values(shelters)]; color 
 simulation.aspect = Makie.DataAspect();
 Makie.hidedecorations!(simulation);
 
-function reset_model!(speed_limit, min_wait)::Nothing
-    global model = init_model(speed_limit, min_wait);
+function reset_model!(options)::Nothing
+    global model = init_model(options...);
     curr_time[] = initial_time;
     evac_list[] = [(0, 0)];
     global evacuated = [];
@@ -658,7 +725,7 @@ function run_no_gui(times, options)
         println("Option ", option);
         for i in 1:times
             println("Run ", i);
-            reset_model!(float(option[1])*mph, float(option[2])*mins);
+            reset_model!([float(option[1])*mph, float(option[2])*mins, option[3:end]...]);
             for now in 1:hour
                 curr_time[] = now;
             end
@@ -667,11 +734,11 @@ function run_no_gui(times, options)
             push!(stats, (evacuated, dead));
         end
     end
-    reset_model!(default_params...);
+    reset_model!(default_params);
     stats
 end
 
-run_no_gui(times) = run_no_gui(times, [(default_params[1]/mph, default_params[2]/mins)]);
+run_no_gui(times) = run_no_gui(times, [(default_params[1]/mph, default_params[2]/mins, default_params[3:end]...)]);
 
 run_no_gui() = run_no_gui(1);
 
@@ -701,7 +768,7 @@ end
 Makie.on(fig.scene.events.window_open) do status
     # If window just closed, reset for a new run
     if !fig.scene.events.window_open.val
-        reset_model!(default_params...);
+        reset_model!(default_params);
     end
 end
 
@@ -712,7 +779,7 @@ function run_record(filename)::Nothing
     end
     println("Evacuated: ", length(evacuated));
     println("Dead: ", length(dead));
-    reset_model!(default_params...);
+    reset_model!(default_params);
     nothing
 end
 
