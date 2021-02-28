@@ -6,6 +6,7 @@ import Makie;
 import Agents;
 import Distributions;
 import ArchGDAL;
+import LightGraphs;
 const OSMX = OpenStreetMapX;
 const AG = ArchGDAL;
 
@@ -149,7 +150,7 @@ dest_θ(a::Agent)::Float64 = Utils.angle(a.pos, a.dest[2]);
 """
 Node ID that the agent is currently at (returns `nothing` if it's not at one).
 """
-at_id(a::Agent) = findfirst(x -> x == a.pos, network.nodes);
+at_id(a::Agent) = findfirst(x -> a.pos == enu_to_tuple(x), network.nodes);
 
 """
 Next intersection in the agent's path.
@@ -163,8 +164,8 @@ end
 Adjacent intersections to the current one. Ignores default but returns it if there aren't any others.
 """
 function adj_inter(node, default)
-    nearby = filter(x -> x ≠ default, network.intersections[node]);
-    isempty(nearby) ? Set([default]) : nearby
+    nearby = findfirst.(isequal.(LightGraphs.neighbors(network.g, network.v[node])), tuple(network.v));
+    isempty(nearby) ? [default] : nearby
 end
 
 """
@@ -314,25 +315,25 @@ function agent_step!(ped::Pedestrian, model)::Nothing
     # If reached intersection or bend in the road
     if ped.time_remaining ≤ 0
         ped.pos = ped.dest[2];
-        if !ped.rerouting && isempty(ped.path)
-            # Reached safety
-            push!(evacuated, (ped.ext_id, shelter_at_node(ped.dest[1])));
-            Agents.kill_agent!(ped, model);
-            return;
-        end
-        # Update speed
-        road_slope = slopes[(ped.dest[1], ped.path[1][1])];
-        set_speed!(ped, ped_speed(road_slope));
-
-        # If finished rerouting
-        if ped.rerouting && isempty(ped.path)
-            done_rerouting(ped, model.ped_shelter_distribution);
+        if isempty(ped.path)
+            if !ped.rerouting
+                # Reached safety
+                push!(evacuated, (ped.ext_id, shelter_at_node(ped.dest[1])));
+                Agents.kill_agent!(ped, model);
+                return;
+            end
+            # Finished rerouting
+            done_rerouting!(ped, model.ped_shelter_distribution);
         end
 
         next_dest!(ped);
         face_dest!(ped);
 
         check_reroute!(ped);
+
+        # Update speed
+        road_slope = slopes[(at_id(ped), ped.dest[1])];
+        set_speed!(ped, ped_speed(road_slope));
 
         update_time_remaining!(ped);
         # If the next intersection is very close, just jump to that instead of a standard move
@@ -361,15 +362,14 @@ function agent_step!(car::Car, model)::Nothing
         if !isnothing(car.behind)
             car.behind.ahead = nothing;
         end
-        if !car.rerouting && isempty(car.path)
-            # Reached safety
-            push!(evacuated, (car.ext_id, shelter_at_node(car.dest[1])));
-            Agents.kill_agent!(car, model);
-            return;
-        end
-
-        # If finished rerouting
-        if car.rerouting && isempty(car.path)
+        if isempty(car.path)
+            if !car.rerouting
+                # Reached safety
+                push!(evacuated, (car.ext_id, shelter_at_node(car.dest[1])));
+                Agents.kill_agent!(car, model);
+                return;
+            end
+            # Finished rerouting
             done_rerouting!(car, model.car_shelter_distribution);
         end
 
