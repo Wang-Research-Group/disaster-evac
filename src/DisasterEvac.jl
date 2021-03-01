@@ -161,10 +161,12 @@ function next_intersection(a::Agent)
 end
 
 """
-Adjacent intersections to the current one. Ignores default but returns it if there aren't any others.
+Adjacent nonflooded intersections to the current one. Returns default if there aren't any.
 """
 function adj_inter(node, default)
-    nearby = findfirst.(isequal.(LightGraphs.neighbors(network.g, network.v[node])), tuple(network.v));
+    nearby = filter(findfirst.(isequal.(LightGraphs.neighbors(network.g, network.v[node])), tuple(network.v))) do x
+        !flooded(enu_to_tuple(network.nodes[x]))
+    end;
     isempty(nearby) ? [default] : nearby
 end
 
