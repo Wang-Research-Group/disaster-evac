@@ -18,8 +18,9 @@ include("parse_data.jl");
 
 const Agent = Agents.AbstractAgent;
 
-# Speed, min milling time, and chance of pedestrian vs car
-const default_params = (25mph, 0mins, 0.5);
+# Speed, min milling time, and chance of pedestrian vs car, 
+# change of parameter of walking destination distance, and that for drive
+const default_params = (25mph, 0mins, 0.5, 0.002, 0.573);
 
 
 # Set up observables
@@ -526,19 +527,25 @@ shelter_at_node(n)::Int = findfirst(x -> x.node_id == n, shelters);
 """
 Initialize the model.
 """
-function init_model(speed_limit, min_wait, mode)::Agents.ABM
+function init_model(speed_limit, min_wait, mode, walke_Des_θ, Drive_Des_θ)::Agents.ABM
     space = Agents.ContinuousSpace(2; periodic = false); # 2D space
 
     properties = Dict();
     # The following distributions are determined from a survey
-    properties[:ped_shelter_distribution] = Distributions.Gamma(1.920, 1/0.002);
-    properties[:car_shelter_distribution] = Distributions.Gamma(1.646, 1/0.000573);
+    properties[:ped_shelter_distribution] = Distributions.Gamma(1.920, 1/walke_Des_θ);
+    properties[:car_shelter_distribution] = Distributions.Gamma(1.646, 1/(Drive_Des_θ/1000));
 
     # Set all road speed limits in mph
     properties[:speed_limit] = speed_limit;
 
     # Set percent chance of a pedestrian vs a car
     properties[:mode] = mode;
+
+    # set change of θ in dristribution for walking destination distance
+    properties[:walke_Des_θ] = walke_Des_θ;
+
+    # set change of θ in dristribution for driving destination distance
+    properties[:Drive_Des_θ] = Drive_Des_θ;
 
     # Resident needs to go last in each step, otherwise when they transform the agent will get an extra movement
     model = Agents.AgentBasedModel(
