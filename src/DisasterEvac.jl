@@ -18,9 +18,9 @@ include("parse_data.jl");
 
 const Agent = Agents.AbstractAgent;
 
-# Speed, min milling time, chance of pedestrian vs car, 
-# parameter of walking destination distance, and that for drive
-const default_params = (25mph, 0mins, 0.5, 0.002, 0.573);
+# [1]: Milling time, evacuation decision, mode split, ped & car shelter choice, ped speed, speed limit 
+# [2]: Min milling time
+const default_params = ([(true, 0.154), 0.8, 0.5, (1/0.002, 1/(0.573/1000)), (true, 1.65), 25mph], 0mins);
 
 
 # Set up observables
@@ -335,8 +335,12 @@ function agent_step!(ped::Pedestrian, model)::Nothing
         check_reroute!(ped);
 
         # Update speed
-        road_slope = slopes[(at_id(ped), ped.dest[1])];
-        set_speed!(ped, ped_speed(road_slope));
+        if model.fixed_ped_speed
+            set_speed!(ped, model.ped_speed);
+        else
+            road_slope = slopes[(at_id(ped), ped.dest[1])];
+            set_speed!(ped, ped_speed(road_slope, model.hiking_param));
+        end
 
         update_time_remaining!(ped);
         # If the next intersection is very close, just jump to that instead of a standard move
@@ -422,7 +426,7 @@ function random_point()::Point
     rand() * (tsunamiʸ[end] - tsunamiʸ[1]) + tsunamiʸ[1])
 end
 
-ped_speed(slope)::Float64 = 1.65*exp(-2.30*abs(slope - 0.004))*m/s;
+ped_speed(slope, hiking_param)::Float64 = hiking_param*exp(-2.30*abs(slope - 0.004))*m/s;
 
 """
 Free road term of the IDM car following model.
@@ -527,19 +531,30 @@ shelter_at_node(n)::Int = findfirst(x -> x.node_id == n, shelters);
 """
 Initialize the model.
 """
-function init_model(speed_limit, min_wait, mode, walk_dest_θ, drive_dest_θ)::Agents.ABM
+function init_model(waiting, evac, mode, θ, dyn_ped_speed, speed_limit, min_wait)::Agents.ABM
     space = Agents.ContinuousSpace(2; periodic = false); # 2D space
 
     properties = Dict();
-    # The following distributions are determined from a survey
-    properties[:ped_shelter_distribution] = Distributions.Gamma(1.920, 1/walk_dest_θ);
-    properties[:car_shelter_distribution] = Distributions.Gamma(1.646, 1/(drive_dest_θ/1000));
 
-    # Set all road speed limits in mph
-    properties[:speed_limit] = speed_limit;
+    properties[:evac] = evac;
 
     # Set percent chance of a pedestrian vs a car
     properties[:mode] = mode;
+
+    # Go to closest shelter or use a distribution to find one
+    # The following distributions are determined from a survey
+    properties[:ped_shelter_distribution] = isnothing(θ) ? nothing : Distributions.Gamma(1.920, θ[1]);
+    properties[:car_shelter_distribution] = isnothing(θ) ? nothing : Distributions.Gamma(1.646, θ[2]);
+
+    properties[:fixed_ped_speed] = !dyn_ped_speed[1];
+    if properties[:fixed_ped_speed]
+        properties[:ped_speed] = dyn_ped_speed[2];
+    else
+        properties[:hiking_param] = dyn_ped_speed[2];
+    end
+
+    # Set all road speed limits in mph
+    properties[:speed_limit] = speed_limit;
 
     # Resident needs to go last in each step, otherwise when they transform the agent will get an extra movement
     model = Agents.AgentBasedModel(
@@ -550,15 +565,15 @@ function init_model(speed_limit, min_wait, mode, walk_dest_θ, drive_dest_θ)::A
         warn = false
     );
 
-    # Generate a log normal distribution for milling time
-    μ = 2.07;
-    σ = 0.85;
-    milling_distribution = Distributions.LogNormal(μ, σ);
+    milling = waiting[1] ? begin
+        # Generate a gamma distribution for milling time
+        α = 1.659;
+        Distributions.Gamma(α, waiting[2])
+    end : waiting[2];
 
     for person in people
         # A distribution provides the number of minutes to mill around (plus the min wait)
-        # Min wait is in mins
-        milling_time = rand(milling_distribution)*mins + min_wait;
+        milling_time = (waiting[1] ? rand(milling)*mins : milling) + min_wait;
         resident = new_resident(person, milling_time, model);
         Agents.add_agent_pos!(resident, model);
     end
@@ -566,12 +581,15 @@ function init_model(speed_limit, min_wait, mode, walk_dest_θ, drive_dest_θ)::A
     model
 end
 
-init_model() = init_model(default_params...);
+init_model() = init_model(default_params[1]..., default_params[2]);
 
 """
 Selects a shelter based on how far away it is and a provided distribution.
 """
 function select_shelter(pos::Point, distribution)::Int64
+    if isnothing(distribution)
+        return select_shelter(pos);
+    end
     shelter_ids = collect(keys(shelters));
     # Plug in the distance to each shelter to the distribution
     Y = Distributions.pdf.(distribution, dist.(tuple(pos), map(x -> x.pos, values(shelters))));
@@ -584,6 +602,11 @@ function select_shelter(pos::Point, distribution)::Int64
 end
 
 """
+Selects the closest shelter.
+"""
+select_shelter(pos::Point)::Int64 = argmin(Dict(k => dist(pos, v.pos) for (k, v) ∈ shelters));
+
+"""
 Initialize a new resident.
 """
 function new_resident(person, milling_time, model)::Resident
@@ -592,7 +615,7 @@ function new_resident(person, milling_time, model)::Resident
     #pos = random_point();
     pos = person.pos;
     #will_evac = person.Attribute_2;
-    will_evac = person.evac;
+    will_evac = isnothing(model.evac) ? person.evac : rand() ≤ model.evac;
     # Initialize resident facing to the right
     θ = 0;
     resident = if will_evac
@@ -618,8 +641,12 @@ function new_pedestrian(ext_id, resident_pos, model)::Pedestrian
     path = get_path(resident_pos[1], shelters[shelter].node_id, network_segments);
     dest = next_dest(path);
 
-    road_slope = slopes[(resident_pos[1], dest[1])];
-    speed = ped_speed(road_slope);
+    speed = if model.fixed_ped_speed
+        model.ped_speed
+    else
+        road_slope = slopes[(resident_pos[1], dest[1])];
+        ped_speed(road_slope, model.hiking_param)
+    end;
 
     # Initialize pedestrian facing to the right
     θ = 0;
@@ -710,8 +737,8 @@ Makie.scatter!(simulation, [shelter.pos for shelter in values(shelters)]; color 
 simulation.aspect = Makie.DataAspect();
 Makie.hidedecorations!(simulation);
 
-function reset_model!(options)::Nothing
-    global model = init_model(options...);
+function reset_model!(options, min_wait)::Nothing
+    global model = init_model(options..., min_wait);
     curr_time[] = initial_time;
     evac_list[] = [(0, 0)];
     global evacuated = [];
@@ -720,15 +747,29 @@ function reset_model!(options)::Nothing
     nothing
 end
 
-function run_no_gui(times, options)
+"""
+Convert units of options to internal units.
+"""
+function convert_options(options, min_wait)
+    ([
+        (options[1][1], options[1][1] ? options[1][2] : float(options[1][2])*mins),
+        options[2:3]...,
+        isnothing(options[4]) ? nothing : (1/options[4][1], 1/(options[4][2]/1000.0)),
+        (options[5][1], options[5][1] ? options[5][2] : float(options[5][2])*mph),
+        float(options[6])*mph
+    ], float(min_wait)*mins)
+end
+
+function run_no_gui(times, options, min_wait)
     # Interpreting options as mph and mins
     hour = convert(Int, hr);
     stats = [];
+    println("Minimum milling time: ", min_wait, " mins");
     for option ∈ options
         println("Option ", option);
         for i in 1:times
             println("Run ", i);
-            reset_model!([float(option[1])*mph, float(option[2])*mins, option[3:end]...]);
+            reset_model!(convert_options(option, min_wait)...);
             for now in 1:hour
                 curr_time[] = now;
             end
@@ -737,11 +778,13 @@ function run_no_gui(times, options)
             push!(stats, (evacuated, dead));
         end
     end
-    reset_model!(default_params);
+    reset_model!(default_params[1], min_wait);
     stats
 end
 
-run_no_gui(times) = run_no_gui(times, [(default_params[1]/mph, default_params[2]/mins, default_params[3:end]...)]);
+run_no_gui(times, options) = run_no_gui(times, options, default_params[2]/mins);
+
+run_no_gui(times) = run_no_gui(times, [(default_params[1][1:3]..., (1/default_params[1][4][1], 1/(default_params[1][4][1]/1000.0)), default_params[1][5], default_params[1][6]/mph)]);
 
 run_no_gui() = run_no_gui(1);
 
@@ -771,7 +814,7 @@ end
 Makie.on(fig.scene.events.window_open) do status
     # If window just closed, reset for a new run
     if !fig.scene.events.window_open.val
-        reset_model!(default_params);
+        reset_model!(default_params...);
     end
 end
 
@@ -782,7 +825,7 @@ function run_record(filename)::Nothing
     end
     println("Evacuated: ", length(evacuated));
     println("Dead: ", length(dead));
-    reset_model!(default_params);
+    reset_model!(default_params...);
     nothing
 end
 

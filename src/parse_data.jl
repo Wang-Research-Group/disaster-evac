@@ -162,6 +162,9 @@ function tsunami_extrema()::NTuple{2,Float64}
 end
 
 function people(filename)
+    # The people file must have an `Attribute_2` column indicating evacuation or not, regardless of if
+    # it will be passed in as a probability when the simulation is run. In that case, it does not matter
+    # whether the values in this column are 1 or 0.
     map(CSV.File(filename; normalizenames = true, types = [Int, Float64, Float64, Float64, Bool])) do p
         Person(p.ID, (p.X - offset[1], p.Y - offset[2]), p.Attribute_2)
     end
