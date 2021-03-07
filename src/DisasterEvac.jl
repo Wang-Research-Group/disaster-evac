@@ -531,7 +531,7 @@ shelter_at_node(n)::Int = findfirst(x -> x.node_id == n, shelters);
 """
 Initialize the model.
 """
-function init_model(waiting, evac, mode, θ, dyn_ped_speed, speed_limit, min_wait)::Agents.ABM
+function init_model(waiting, evac, mode, shelter_θ, dyn_ped_speed, speed_limit, min_wait)::Agents.ABM
     space = Agents.ContinuousSpace(2; periodic = false); # 2D space
 
     properties = Dict();
@@ -543,8 +543,8 @@ function init_model(waiting, evac, mode, θ, dyn_ped_speed, speed_limit, min_wai
 
     # Go to closest shelter or use a distribution to find one
     # The following distributions are determined from a survey
-    properties[:ped_shelter_distribution] = isnothing(θ) ? nothing : Distributions.Gamma(1.920, θ[1]);
-    properties[:car_shelter_distribution] = isnothing(θ) ? nothing : Distributions.Gamma(1.646, θ[2]);
+    properties[:ped_shelter_distribution] = isnothing(shelter_θ) ? nothing : Distributions.Gamma(1.920, shelter_θ[1]);
+    properties[:car_shelter_distribution] = isnothing(shelter_θ) ? nothing : Distributions.Gamma(1.646, shelter_θ[2]);
 
     properties[:fixed_ped_speed] = !dyn_ped_speed[1];
     if properties[:fixed_ped_speed]
