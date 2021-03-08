@@ -318,7 +318,7 @@ function agent_step!(ped::Pedestrian, model)::Nothing
     # If reached intersection or bend in the road
     if ped.time_remaining ≤ 0
         ped.pos = ped.dest[2];
-        if isempty(ped.path)
+        while isempty(ped.path)
             if !ped.rerouting
                 # Reached safety
                 push!(evacuated, (ped.ext_id, shelter_at_node(ped.dest[1])));
@@ -369,7 +369,7 @@ function agent_step!(car::Car, model)::Nothing
         if !isnothing(car.behind)
             car.behind.ahead = nothing;
         end
-        if isempty(car.path)
+        while isempty(car.path)
             if !car.rerouting
                 # Reached safety
                 push!(evacuated, (car.ext_id, shelter_at_node(car.dest[1])));
