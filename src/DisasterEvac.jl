@@ -31,6 +31,9 @@ half_mins = Makie.Node{Int}(floor(initial_time / 30s)); # Value rounded down in 
 # Set up stats
 evacuated = [];
 dead = [];
+Ped_dead = [];
+Car_dead = [];
+Shelter_dead = [];
 
 function set_filenames()
     filenames = Dict();
@@ -242,6 +245,11 @@ function tsunami_killed!(agent::Agent)::Bool
         set_speed!(agent, 0.0);
         agent.alive = false;
         push!(dead, (agent.ext_id, agent.pos));
+        if agent isa Pedestrian
+            push!(Ped_dead, (agent.ext_id, agent.pos));
+        elseif agent isa Car
+            push!(Car_dead, (agent.ext_id, agent.pos));
+        end
         return true;
     end
     false
@@ -407,6 +415,7 @@ function model_step!(model)::Nothing
             now_dead = popat!.(tuple(evacuated), reverse(had_evacuated)); # Have to reverse so popping uses correct indices
             # Add to dead
             push!(dead, map(x -> (x[1], shelter.pos), now_dead)...);
+            push!(Shelter_dead, map(x -> (x[1], shelter.pos), now_dead)...);
         else
             shelter.inundated = false;
         end
@@ -775,6 +784,9 @@ function run_no_gui(times, options, min_wait)
             end
             println("Evacuated: ", length(evacuated));
             println("Dead: ", length(dead));
+            println("Ped_Dead: ", length(Ped_dead));
+            println("Car_Dead: ", length(Car_dead));
+            println("Shleter_Dead: ", length(Shelter_dead));
             push!(stats, (evacuated, dead));
         end
     end
@@ -805,6 +817,9 @@ Makie.on(button.clicks) do click
             if now == hour
                 println("Evacuated: ", length(evacuated));
                 println("Dead: ", length(dead));
+                println("Ped_Dead: ", length(Ped_dead));
+                println("Car_Dead: ", length(Car_dead));
+                println("Shleter_Dead: ", length(Shelter_dead));
                 button.clicks[] = 0;
             end
         end
@@ -825,6 +840,9 @@ function run_record(filename)::Nothing
     end
     println("Evacuated: ", length(evacuated));
     println("Dead: ", length(dead));
+    println("Ped_Dead: ", length(Ped_dead));
+    println("Car_Dead: ", length(Car_dead));
+    println("Shleter_Dead: ", length(Shelter_dead));
     reset_model!(default_params...);
     nothing
 end
