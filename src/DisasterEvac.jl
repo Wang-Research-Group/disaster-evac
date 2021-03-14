@@ -753,6 +753,9 @@ function reset_model!(options, min_wait)::Nothing
     global evacuated = [];
     death_list[] = [(0, 0)];
     global dead = [];
+    global Ped_dead = [];
+    global Car_dead = [];
+    global Shelter_dead = [];
     nothing
 end
 
