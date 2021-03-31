@@ -693,6 +693,8 @@ model = init_model();
 # Lists of tuples `(current time, statistic)`
 evac_list = Makie.Node{Array{Tuple{Int,Int},1}}([(0, 0)]);
 death_list = Makie.Node{Array{Tuple{Int,Int},1}}([(0, 0)]);
+Ped_death_list = Makie.Node{Array{Tuple{Int,Int},1}}([(0, 0)]);
+Car_death_list = Makie.Node{Array{Tuple{Int,Int},1}}([(0, 0)]);
 
 # Get a new agent list (with only enough info for plotting) and step the model every time there's a new frame
 agent_list = Makie.lift(curr_time; typ = Array{Tuple{Tuple{Float64,Float64},Symbol,Symbol},1}) do now
@@ -701,6 +703,8 @@ agent_list = Makie.lift(curr_time; typ = Array{Tuple{Tuple{Float64,Float64},Symb
     if now % minute == 0
         evac_list[] = push!(evac_list[], (now / minute, length(evacuated)));
         death_list[] = push!(death_list[], (now / minute, length(dead)));
+        Ped_death_list[] = push!(Ped_death_list[], (now / minute, length(Ped_dead)));
+        Car_death_list[] = push!(Car_death_list[], (now / minute, length(Car_dead)));
     end
     curr_half_mins::Int = floor(now / 30s);
     # Need to do a conditional because we don't want the observable to trigger unless it's a new value
@@ -720,10 +724,13 @@ color_list = Makie.@lift(getindex.($agent_list, 2));
 marker_list = Makie.@lift(getindex.($agent_list, 3));
 
 fig = Makie.Figure(; resolution = (1200, 900));
-simulation = fig[1:2, 1] = Makie.Axis(fig);
-evac_plot = fig[1, 2] = Makie.Axis(fig; xlabel = "Minutes", ylabel = "Total Evacuated", title = "Successful Evacuations");
-death_plot = fig[2, 2] = Makie.Axis(fig; xlabel = "Minutes", ylabel = "Total Deaths", title = "Deaths");
-Makie.linkaxes!(evac_plot, death_plot);
+simulation = fig[1:2, 1:2] = Makie.Axis(fig);
+evac_plot = fig[1, 3] = Makie.Axis(fig; xlabel = "Minutes", ylabel = "Total Evacuated", title = "Successful Evacuations");
+death_plot = fig[1, 4] = Makie.Axis(fig; xlabel = "Minutes", ylabel = "Mortality", title = "Total Mortality");
+Ped_death_plot = fig[2, 3] = Makie.Axis(fig; xlabel = "Minutes", ylabel = "Mortality", title = " Pedestrian Mortality");
+Car_death_plot = fig[2, 4] = Makie.Axis(fig; xlabel = "Minutes", ylabel = "Mortality", title = "Car Mortality");
+
+#Makie.linkaxes!(evac_plot, death_plot);
 button = fig[0, :] = Makie.Button(fig; label = "Start/Stop");
 button.tellwidth = false;
 
@@ -731,15 +738,21 @@ lines = collect(Iterators.flatten(map(seg -> vcat(map(x -> enu_to_tuple(network.
 Makie.lines!(simulation, lines);
 
 # Render a heatmap
-Makie.heatmap!(simulation, tsunamiˣ, tsunamiʸ, tsunamiᶻ; colormap = :GnBu_9, colorrange = (minᶻ, maxᶻ));
+Makie.heatmap!(simulation, tsunamiˣ, tsunamiʸ, tsunamiᶻ; colormap = :YlGnBu_5, colorrange = (minᶻ, maxᶻ));
 
-Makie.scatter!(simulation, position_list; color = color_list, markersize = 5, marker = marker_list);
+Makie.scatter!(simulation, position_list; color = color_list, markersize = 2, marker = marker_list);
 
-Makie.scatter!(evac_plot, evac_list);
+Makie.lines!(evac_plot, evac_list);
 Makie.limits!(evac_plot, 0, 60, 0, num_residents);
 
-Makie.scatter!(death_plot, death_list);
-Makie.limits!(death_plot, 0, 60, 0, num_residents);
+Makie.lines!(death_plot, death_list);
+Makie.limits!(death_plot, 0, 60, 0, 7000);
+
+Makie.lines!(Ped_death_plot, Ped_death_list);
+Makie.limits!(Ped_death_plot, 0, 60, 0, 4000);
+
+Makie.lines!(Car_death_plot, Car_death_list);
+Makie.limits!(Car_death_plot, 0, 60, 0, 4000);
 
 Makie.scatter!(simulation, [shelter.pos for shelter in values(shelters)]; color = :blue);
 
@@ -756,6 +769,8 @@ function reset_model!(options, min_wait)::Nothing
     global Ped_dead = [];
     global Car_dead = [];
     global Shelter_dead = [];
+    Ped_death_list[] = [(0, 0)];
+    Car_death_list[] = [(0, 0)];
     nothing
 end
 
@@ -838,7 +853,7 @@ end
 
 function run_record(filename)::Nothing
     hour = convert(Int, hr);
-    Makie.record(fig, filename, 1:hour; framerate = 60) do t
+    Makie.record(fig, filename, 1:hour; framerate = 120) do t
         curr_time[] = t;
     end
     println("Evacuated: ", length(evacuated));
