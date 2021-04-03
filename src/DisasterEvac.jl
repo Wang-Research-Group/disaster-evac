@@ -22,6 +22,8 @@ const Agent = Agents.AbstractAgent;
 # [2]: Min milling time
 const default_params = ([(true, 0.154), 0.8, 0.5, (1/0.002, 1/(0.573/1000)), (true, 1.65), 25mph], 0mins);
 
+const location = "seaside";
+
 
 # Set up observables
 initial_time = convert(Int, 0s); # Value in frames
@@ -31,17 +33,17 @@ half_mins = Makie.Node{Int}(floor(initial_time / 30s)); # Value rounded down in 
 # Set up stats
 evacuated = [];
 dead = [];
-Ped_dead = [];
-Car_dead = [];
-Shelter_dead = [];
+ped_dead = [];
+car_dead = [];
+shelter_dead = [];
 
 function set_filenames()
     filenames = Dict();
-    filenames["network"] = "src/data/map.osm";
-    filenames["elevation"] = "src/data/elevation/elevation.asc";
-    filenames["tsunami"] = "src/data/tsunami_inundation";
-    filenames["people"] = "src/data/pop_coordinates.csv";
-    filenames["shelters"] = "src/data/shelter_coordinates.csv";
+    filenames["network"] = "src/data/" * location * "/map.osm";
+    filenames["elevation"] = "src/data/" * location * "/elevation/elevation.asc";
+    filenames["tsunami"] = "src/data/" * location * "/tsunami_inundation";
+    filenames["people"] = "src/data/" * location * "/pop_coordinates.csv";
+    filenames["shelters"] = "src/data/" * location * "/shelter_coordinates.csv";
     filenames
 end
 
@@ -246,9 +248,9 @@ function tsunami_killed!(agent::Agent)::Bool
         agent.alive = false;
         push!(dead, (agent.ext_id, agent.pos));
         if agent isa Pedestrian
-            push!(Ped_dead, (agent.ext_id, agent.pos));
+            push!(ped_dead, (agent.ext_id, agent.pos));
         elseif agent isa Car
-            push!(Car_dead, (agent.ext_id, agent.pos));
+            push!(car_dead, (agent.ext_id, agent.pos));
         end
         return true;
     end
@@ -415,7 +417,7 @@ function model_step!(model)::Nothing
             now_dead = popat!.(tuple(evacuated), reverse(had_evacuated)); # Have to reverse so popping uses correct indices
             # Add to dead
             push!(dead, map(x -> (x[1], shelter.pos), now_dead)...);
-            push!(Shelter_dead, map(x -> (x[1], shelter.pos), now_dead)...);
+            push!(shelter_dead, map(x -> (x[1], shelter.pos), now_dead)...);
         else
             shelter.inundated = false;
         end
@@ -693,8 +695,8 @@ model = init_model();
 # Lists of tuples `(current time, statistic)`
 evac_list = Makie.Node{Array{Tuple{Int,Int},1}}([(0, 0)]);
 death_list = Makie.Node{Array{Tuple{Int,Int},1}}([(0, 0)]);
-Ped_death_list = Makie.Node{Array{Tuple{Int,Int},1}}([(0, 0)]);
-Car_death_list = Makie.Node{Array{Tuple{Int,Int},1}}([(0, 0)]);
+ped_death_list = Makie.Node{Array{Tuple{Int,Int},1}}([(0, 0)]);
+car_death_list = Makie.Node{Array{Tuple{Int,Int},1}}([(0, 0)]);
 
 # Get a new agent list (with only enough info for plotting) and step the model every time there's a new frame
 agent_list = Makie.lift(curr_time; typ = Array{Tuple{Tuple{Float64,Float64},Symbol,Symbol},1}) do now
@@ -703,8 +705,8 @@ agent_list = Makie.lift(curr_time; typ = Array{Tuple{Tuple{Float64,Float64},Symb
     if now % minute == 0
         evac_list[] = push!(evac_list[], (now / minute, length(evacuated)));
         death_list[] = push!(death_list[], (now / minute, length(dead)));
-        Ped_death_list[] = push!(Ped_death_list[], (now / minute, length(Ped_dead)));
-        Car_death_list[] = push!(Car_death_list[], (now / minute, length(Car_dead)));
+        ped_death_list[] = push!(ped_death_list[], (now / minute, length(ped_dead)));
+        car_death_list[] = push!(car_death_list[], (now / minute, length(car_dead)));
     end
     curr_half_mins::Int = floor(now / 30s);
     # Need to do a conditional because we don't want the observable to trigger unless it's a new value
@@ -727,8 +729,8 @@ fig = Makie.Figure(; resolution = (1200, 900));
 simulation = fig[1:2, 1:2] = Makie.Axis(fig);
 evac_plot = fig[1, 3] = Makie.Axis(fig; xlabel = "Minutes", ylabel = "Total Evacuated", title = "Successful Evacuations");
 death_plot = fig[1, 4] = Makie.Axis(fig; xlabel = "Minutes", ylabel = "Mortality", title = "Total Mortality");
-Ped_death_plot = fig[2, 3] = Makie.Axis(fig; xlabel = "Minutes", ylabel = "Mortality", title = " Pedestrian Mortality");
-Car_death_plot = fig[2, 4] = Makie.Axis(fig; xlabel = "Minutes", ylabel = "Mortality", title = "Car Mortality");
+ped_death_plot = fig[2, 3] = Makie.Axis(fig; xlabel = "Minutes", ylabel = "Mortality", title = " Pedestrian Mortality");
+car_death_plot = fig[2, 4] = Makie.Axis(fig; xlabel = "Minutes", ylabel = "Mortality", title = "Car Mortality");
 
 #Makie.linkaxes!(evac_plot, death_plot);
 button = fig[0, :] = Makie.Button(fig; label = "Start/Stop");
@@ -748,11 +750,11 @@ Makie.limits!(evac_plot, 0, 60, 0, num_residents);
 Makie.lines!(death_plot, death_list);
 Makie.limits!(death_plot, 0, 60, 0, 7000);
 
-Makie.lines!(Ped_death_plot, Ped_death_list);
-Makie.limits!(Ped_death_plot, 0, 60, 0, 4000);
+Makie.lines!(ped_death_plot, ped_death_list);
+Makie.limits!(ped_death_plot, 0, 60, 0, 4000);
 
-Makie.lines!(Car_death_plot, Car_death_list);
-Makie.limits!(Car_death_plot, 0, 60, 0, 4000);
+Makie.lines!(car_death_plot, car_death_list);
+Makie.limits!(car_death_plot, 0, 60, 0, 4000);
 
 Makie.scatter!(simulation, [shelter.pos for shelter in values(shelters)]; color = :blue);
 
@@ -766,11 +768,11 @@ function reset_model!(options, min_wait)::Nothing
     global evacuated = [];
     death_list[] = [(0, 0)];
     global dead = [];
-    global Ped_dead = [];
-    global Car_dead = [];
-    global Shelter_dead = [];
-    Ped_death_list[] = [(0, 0)];
-    Car_death_list[] = [(0, 0)];
+    global ped_dead = [];
+    global car_dead = [];
+    global shelter_dead = [];
+    ped_death_list[] = [(0, 0)];
+    car_death_list[] = [(0, 0)];
     nothing
 end
 
@@ -802,9 +804,9 @@ function run_no_gui(times, options, min_wait)
             end
             println("Evacuated: ", length(evacuated));
             println("Dead: ", length(dead));
-            println("Ped_Dead: ", length(Ped_dead));
-            println("Car_Dead: ", length(Car_dead));
-            println("Shleter_Dead: ", length(Shelter_dead));
+            println("ped_dead: ", length(ped_dead));
+            println("car_dead: ", length(car_dead));
+            println("shelter_dead: ", length(shelter_dead));
             push!(stats, (evacuated, dead));
         end
     end
@@ -835,9 +837,9 @@ Makie.on(button.clicks) do click
             if now == hour
                 println("Evacuated: ", length(evacuated));
                 println("Dead: ", length(dead));
-                println("Ped_Dead: ", length(Ped_dead));
-                println("Car_Dead: ", length(Car_dead));
-                println("Shleter_Dead: ", length(Shelter_dead));
+                println("ped_dead: ", length(ped_dead));
+                println("car_dead: ", length(car_dead));
+                println("shelter_dead: ", length(shelter_dead));
                 button.clicks[] = 0;
             end
         end
@@ -858,9 +860,9 @@ function run_record(filename)::Nothing
     end
     println("Evacuated: ", length(evacuated));
     println("Dead: ", length(dead));
-    println("Ped_Dead: ", length(Ped_dead));
-    println("Car_Dead: ", length(Car_dead));
-    println("Shleter_Dead: ", length(Shelter_dead));
+    println("ped_dead: ", length(ped_dead));
+    println("car_dead: ", length(car_dead));
+    println("shelter_dead: ", length(shelter_dead));
     reset_model!(default_params...);
     nothing
 end
