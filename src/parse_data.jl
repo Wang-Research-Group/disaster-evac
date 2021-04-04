@@ -32,11 +32,10 @@ end
 
 offset = nothing;
 
-# TODO: Break most of this into a separate function so it can be reused by both elevation and tsunami data
-function elev_data(network, filepath)
+function read_asc(network, filepath)
     dataset = AG.readraster(filepath);
 
-    source = AG.importWKT(AG.getproj(dataset)); # For the elevation asc files, the projection is UTM
+    source = AG.importWKT(AG.getproj(dataset)); # For the asc files, the projection is UTM
     lla = AG.importEPSG(4326); # Lat-long
     geotrans = AG.getgeotransform(dataset);
 
@@ -46,7 +45,7 @@ function elev_data(network, filepath)
     AG.createcoordtrans(lla, source) do transform
         AG.transform!(network_point, transform)
     end
-    # Assume people and shelters are the same coordinate system as elevation data
+    # Assume people and shelters are the same coordinate system as elevation and landslide data
     global offset = (AG.getx(network_point, 0), AG.gety(network_point, 0));
 
     missing_val = AG.getnodatavalue(AG.getband(dataset, 1));
@@ -64,7 +63,7 @@ function elev_data(network, filepath)
 end
 
 function set_elevations!(network, filepath)
-    origin, elevᶻ, x_step, y_step = elev_data(network, filepath);
+    origin, elevᶻ, x_step, y_step = read_asc(network, filepath);
     max_x_index = size(elevᶻ, 1);
     max_y_index = size(elevᶻ, 2);
     for (id, pos) in network.nodes

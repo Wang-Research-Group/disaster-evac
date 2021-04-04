@@ -18,9 +18,9 @@ include("parse_data.jl");
 
 const Agent = Agents.AbstractAgent;
 
-# [1]: Milling time, evacuation decision, mode split, ped & car shelter choice, ped speed, speed limit 
+# [1]: Milling time, evacuation decision, mode split, ped & car shelter choice, ped speed, speed limit, landslide
 # [2]: Min milling time
-const default_params = ([(true, 0.154), 0.8, 0.5, (1/0.002, 1/(0.573/1000)), (true, 1.65), 25mph], 0mins);
+const default_params = ([(true, 0.154), 0.8, 0.5, (1/0.002, 1/(0.573/1000)), (true, 1.65), 25mph, false], 0mins);
 
 const location = "seaside";
 
@@ -41,6 +41,7 @@ function set_filenames()
     filenames = Dict();
     filenames["network"] = "src/data/" * location * "/map.osm";
     filenames["elevation"] = "src/data/" * location * "/elevation/elevation.asc";
+    filenames["landslide"] = "src/data/" * location * "/landslide/landslide.asc";
     filenames["tsunami"] = "src/data/" * location * "/tsunami_inundation";
     filenames["people"] = "src/data/" * location * "/pop_coordinates.csv";
     filenames["shelters"] = "src/data/" * location * "/shelter_coordinates.csv";
@@ -542,7 +543,7 @@ shelter_at_node(n)::Int = findfirst(x -> x.node_id == n, shelters);
 """
 Initialize the model.
 """
-function init_model(waiting, evac, mode, shelter_θ, dyn_ped_speed, speed_limit, min_wait)::Agents.ABM
+function init_model(waiting, evac, mode, shelter_θ, dyn_ped_speed, speed_limit, landslide, min_wait)::Agents.ABM
     space = Agents.ContinuousSpace(2; periodic = false); # 2D space
 
     properties = Dict();
@@ -566,6 +567,9 @@ function init_model(waiting, evac, mode, shelter_θ, dyn_ped_speed, speed_limit,
 
     # Set all road speed limits in mph
     properties[:speed_limit] = speed_limit;
+
+    # Considering landslides or not
+    properties[:landslide] = landslide;
 
     # Resident needs to go last in each step, otherwise when they transform the agent will get an extra movement
     model = Agents.AgentBasedModel(
@@ -785,7 +789,8 @@ function convert_options(options, min_wait)
         options[2:3]...,
         isnothing(options[4]) ? nothing : (1/options[4][1], 1/(options[4][2]/1000.0)),
         (options[5][1], options[5][1] ? options[5][2] : float(options[5][2])*mph),
-        float(options[6])*mph
+        float(options[6])*mph,
+        options[7]
     ], float(min_wait)*mins)
 end
 
@@ -816,7 +821,7 @@ end
 
 run_no_gui(times, options) = run_no_gui(times, options, default_params[2]/mins);
 
-run_no_gui(times) = run_no_gui(times, [(default_params[1][1:3]..., (1/default_params[1][4][1], 1/(default_params[1][4][1]/1000.0)), default_params[1][5], default_params[1][6]/mph)]);
+run_no_gui(times) = run_no_gui(times, [(default_params[1][1:3]..., (1/default_params[1][4][1], 1/(default_params[1][4][1]/1000.0)), default_params[1][5], default_params[1][6]/mph, default_params[1][7])]);
 
 run_no_gui() = run_no_gui(1);
 
