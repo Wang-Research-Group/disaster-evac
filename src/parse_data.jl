@@ -1,6 +1,6 @@
 module Data
 
-export network, set_elevations!, get_slopes, tsunami_data, tsunami_extrema, tsunami_resolution, people, shelters;
+export network, set_elevations!, get_slopes, get_landslides, tsunami_data, tsunami_extrema, tsunami_resolution, people, shelters;
 
 import OpenStreetMapX;
 import CSV;
@@ -82,15 +82,53 @@ end
 
 function get_slopes(network, segments)
     Dict(map(Iterators.flatten(map(seg -> zip(seg, seg[2:end]), values(segments)))) do ids
-        i1 = network.nodes[ids[1]];
-        i2 = network.nodes[ids[2]];
-        rise = i2.up - i1.up;
-        run = OSMX.distance(i1, OSMX.ENU(i2.east, i2.north, i1.up));
+        i₁ = network.nodes[ids[1]];
+        i₂ = network.nodes[ids[2]];
+        rise = i₂.up - i₁.up;
+        run = OSMX.distance(i₁, OSMX.ENU(i₂.east, i₂.north, i₁.up));
         slope = rise / run;
         if isnan(slope)
             slope = 0.0;
         end
         (ids, slope)
+    end)
+end
+
+"""
+The mode of a collection; if tied, return the larger value.
+"""
+function mode(a)
+    uniques = reverse(sort(unique(a)));
+    counts = map(x -> count(i -> i == x, a), uniques);
+    uniques[argmax(counts)]
+end
+
+function get_landslides(network, segments, filepath)
+    origin, landᶻ, x_step, y_step = read_asc(network, filepath);
+    max_x_index = size(landᶻ, 1);
+    max_y_index = size(landᶻ, 2);
+    coeffs = Dict(
+        1 => 1.0,
+        2 => 0.5556,
+        3 => 0.5556,
+        4 => 0.5556
+    );
+    Dict(map(Iterators.flatten(map(seg -> zip(seg, seg[2:end]), values(segments)))) do ids
+        p₁ = network.nodes[ids[1]];
+        p₂ = network.nodes[ids[2]];
+        n = max(round(OSMX.distance(p₁, p₂) / 10m), 1);
+        Δp = (p₂ - p₁) / float(n);
+        points = map(i -> OSMX.ENU(p₁.east + i*Δp.east, p₁.north + i*Δp.north), 1:n);
+        landslides = map(points) do p
+            x_index::Int = floor((p.east - origin[1]) / x_step) + 1;
+            y_index::Int = floor((p.north - origin[2]) / y_step) + 1;
+            if 1 ≤ x_index ≤ max_x_index && 1 ≤ y_index ≤ max_y_index
+                landᶻ[x_index,y_index]
+            else
+                NaN
+            end
+        end;
+        (ids, get(coeffs, mode(landslides), 1.0))
     end)
 end
 

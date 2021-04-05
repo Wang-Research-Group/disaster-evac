@@ -4,7 +4,7 @@ import OpenStreetMapX;
 const OSMX = OpenStreetMapX;
 
 export s, ft, mins, hr, mi, mph, m;
-export Point, enu_to_tuple, dist;
+export Point, enu_to_tuple, dist, -, /;
 
 # Unit conversions
 # These take advantage of Julia's 'numeric literal coefficients' to appear like regular units
@@ -32,5 +32,9 @@ dist(a::Point, b::Point)::Float64 = OSMX.distance(OSMX.ENU(a...), OSMX.ENU(b...)
 Determine the angle between two points.
 """
 angle(a::Point, b::Point)::Float64 = atan(b[2] - a[2], b[1] - a[1]);
+
+Base.:-(a::OSMX.ENU, b::OSMX.ENU)::OSMX.ENU = OSMX.ENU(a.east - b.east, a.north - b.north, a.up - b.up);
+
+Base.:/(a::OSMX.ENU, c::Float64)::OSMX.ENU = OSMX.ENU(a.east / c, a.north / c, a.up / c);
 
 end # module

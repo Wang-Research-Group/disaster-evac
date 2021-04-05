@@ -56,6 +56,8 @@ network, network_segments = Data.network(filenames["network"]);
 Data.set_elevations!(network, filenames["elevation"]);
 slopes = Data.get_slopes(network, network_segments);
 
+landslides = Data.get_landslides(network, network_segments, filenames["landslide"]);
+
 tsunamiˣ, tsunamiʸ, tsunamiᶻ = Data.tsunami_data(initial_time, half_mins, network, filenames["tsunami"]);
 minᶻ, maxᶻ = Data.tsunami_extrema();
 
@@ -350,7 +352,12 @@ function agent_step!(ped::Pedestrian, model)::Nothing
             set_speed!(ped, model.ped_speed);
         else
             road_slope = slopes[(at_id(ped), ped.dest[1])];
-            set_speed!(ped, ped_speed(road_slope, model.hiking_param));
+            if model.landslide
+                l_coeff = landslides[(at_id(ped), ped.dest[1])];
+                set_speed!(ped, ped_speed(road_slope, model.hiking_param, l_coeff));
+            else
+                set_speed!(ped, ped_speed(road_slope, model.hiking_param));
+            end
         end
 
         update_time_remaining!(ped);
@@ -438,7 +445,9 @@ function random_point()::Point
     rand() * (tsunamiʸ[end] - tsunamiʸ[1]) + tsunamiʸ[1])
 end
 
-ped_speed(slope, hiking_param)::Float64 = hiking_param*exp(-2.30*abs(slope - 0.004))*m/s;
+ped_speed(slope, h, l)::Float64 = l*h*exp(-2.30*abs(slope - 0.004))*m/s;
+
+ped_speed(slope, h) = ped_speed(slope, h, 1.0);
 
 """
 Free road term of the IDM car following model.
@@ -660,7 +669,12 @@ function new_pedestrian(ext_id, resident_pos, model)::Pedestrian
         model.ped_speed
     else
         road_slope = slopes[(resident_pos[1], dest[1])];
-        ped_speed(road_slope, model.hiking_param)
+        if model.landslide
+            l_coeff = landslides[(resident_pos[1], dest[1])];
+            ped_speed(road_slope, model.hiking_param, l_coeff)
+        else
+            ped_speed(road_slope, model.hiking_param)
+        end
     end;
 
     # Initialize pedestrian facing to the right
