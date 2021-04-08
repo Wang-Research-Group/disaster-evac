@@ -22,7 +22,7 @@ const Agent = Agents.AbstractAgent;
 # [2]: Min milling time
 const default_params = ([(true, 0.154), 0.8, 0.5, (1/0.002, 1/(0.573/1000)), (true, 1.65), 25mph, false], 0mins);
 
-const location = "seaside";
+const location = "Coosbay";
 
 
 # Set up observables
@@ -349,7 +349,12 @@ function agent_step!(ped::Pedestrian, model)::Nothing
 
         # Update speed
         if model.fixed_ped_speed
-            set_speed!(ped, model.ped_speed);
+            if model.landslide
+                l_coeff = landslides[(at_id(ped), ped.dest[1])];
+                set_speed!(ped, l_coeff*model.ped_speed);
+            else
+                set_speed!(ped, model.ped_speed);
+            end
         else
             road_slope = slopes[(at_id(ped), ped.dest[1])];
             if model.landslide
