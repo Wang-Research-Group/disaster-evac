@@ -108,10 +108,11 @@ function get_landslides(network, segments, filepath)
     max_x_index = size(landᶻ, 1);
     max_y_index = size(landᶻ, 2);
     coeffs = Dict(
-        1 => 1.0,
-        2 => 0.5556,
-        3 => 0.5556,
-        4 => 0.5556
+        0 => 1.0,
+        1 => 0.5556,
+        #2 => 0.5556,
+        #3 => 0.5556,
+        #4 => 0.5556
     );
     Dict(map(Iterators.flatten(map(seg -> zip(seg, seg[2:end]), values(segments)))) do ids
         p₁ = network.nodes[ids[1]];
