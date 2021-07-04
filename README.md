@@ -6,8 +6,9 @@ Currently designed to be tsunami-specific.
 To run, open a Julia REPL in the directory of this repo, then execute the following steps:
 
 1. `]activate .`
-2. `include("src/DisasterEvac.jl")`
-3. Run the simulation
+2. `]instantiate`
+3. `include("src/DisasterEvac.jl")`
+4. Run the simulation
 - With a graphical interface: `DisasterEvac.run_gui()`
 - Without a graphical interface: `DisasterEvac.run_no_gui()`
 - Record an animation: `DisasterEvac.run_record()`

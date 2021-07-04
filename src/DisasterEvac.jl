@@ -2,7 +2,7 @@ module DisasterEvac
 
 import OpenStreetMapX;
 import CSV;
-import Makie;
+import GLMakie;
 import Agents;
 import Distributions;
 import ArchGDAL;
@@ -22,13 +22,13 @@ const Agent = Agents.AbstractAgent;
 # [2]: Min milling time
 const default_params = ([(true, 0.154), 0.8, 0.5, (1/0.002, 1/(0.573/1000)), (true, 1.65), 25mph, false], 0mins);
 
-const location = "Coosbay";
+const location = "coos_bay";
 
 
 # Set up observables
 initial_time = convert(Int, 0s); # Value in frames
-curr_time = Makie.Node{Int}(initial_time); # Value in frames
-half_mins = Makie.Node{Int}(floor(initial_time / 30s)); # Value rounded down in half-minutes
+curr_time = GLMakie.Node{Int}(initial_time); # Value in frames
+half_mins = GLMakie.Node{Int}(floor(initial_time / 30s)); # Value rounded down in half-minutes
 
 # Set up stats
 evacuated = [];
@@ -716,13 +716,13 @@ end
 model = init_model();
 
 # Lists of tuples `(current time, statistic)`
-evac_list = Makie.Node{Array{Tuple{Int,Int},1}}([(0, 0)]);
-death_list = Makie.Node{Array{Tuple{Int,Int},1}}([(0, 0)]);
-ped_death_list = Makie.Node{Array{Tuple{Int,Int},1}}([(0, 0)]);
-car_death_list = Makie.Node{Array{Tuple{Int,Int},1}}([(0, 0)]);
+evac_list = GLMakie.Node{Array{Tuple{Int,Int},1}}([(0, 0)]);
+death_list = GLMakie.Node{Array{Tuple{Int,Int},1}}([(0, 0)]);
+ped_death_list = GLMakie.Node{Array{Tuple{Int,Int},1}}([(0, 0)]);
+car_death_list = GLMakie.Node{Array{Tuple{Int,Int},1}}([(0, 0)]);
 
 # Get a new agent list (with only enough info for plotting) and step the model every time there's a new frame
-agent_list = Makie.lift(curr_time; typ = Array{Tuple{Tuple{Float64,Float64},Symbol,Symbol},1}) do now
+agent_list = GLMakie.lift(Array{Tuple{Tuple{Float64,Float64},Symbol,Symbol},1}, curr_time) do now
     # Things to do on every frame
     minute = convert(Int, mins); # Make sure a minute can be evenly divided by frames
     if now % minute == 0
@@ -744,45 +744,45 @@ agent_list = Makie.lift(curr_time; typ = Array{Tuple{Tuple{Float64,Float64},Symb
 end
 
 # Separate out the tuple of info into new observables because `scatter` can't handle it otherwise
-position_list = Makie.@lift(getindex.($agent_list, 1));
-color_list = Makie.@lift(getindex.($agent_list, 2));
-marker_list = Makie.@lift(getindex.($agent_list, 3));
+position_list = GLMakie.@lift(getindex.($agent_list, 1));
+color_list = GLMakie.@lift(getindex.($agent_list, 2));
+marker_list = GLMakie.@lift(getindex.($agent_list, 3));
 
-fig = Makie.Figure(; resolution = (1200, 900));
-simulation = fig[1:2, 1:2] = Makie.Axis(fig);
-evac_plot = fig[1, 3] = Makie.Axis(fig; xlabel = "Minutes", ylabel = "Total Evacuated", title = "Successful Evacuations");
-death_plot = fig[1, 4] = Makie.Axis(fig; xlabel = "Minutes", ylabel = "Mortality", title = "Total Mortality");
-ped_death_plot = fig[2, 3] = Makie.Axis(fig; xlabel = "Minutes", ylabel = "Mortality", title = " Pedestrian Mortality");
-car_death_plot = fig[2, 4] = Makie.Axis(fig; xlabel = "Minutes", ylabel = "Mortality", title = "Car Mortality");
+fig = GLMakie.Figure(; resolution = (1200, 900));
+simulation = fig[1:2, 1:2] = GLMakie.Axis(fig);
+evac_plot = fig[1, 3] = GLMakie.Axis(fig; xlabel = "Minutes", ylabel = "Total Evacuated", title = "Successful Evacuations");
+death_plot = fig[1, 4] = GLMakie.Axis(fig; xlabel = "Minutes", ylabel = "Mortality", title = "Total Mortality");
+ped_death_plot = fig[2, 3] = GLMakie.Axis(fig; xlabel = "Minutes", ylabel = "Mortality", title = " Pedestrian Mortality");
+car_death_plot = fig[2, 4] = GLMakie.Axis(fig; xlabel = "Minutes", ylabel = "Mortality", title = "Car Mortality");
 
-#Makie.linkaxes!(evac_plot, death_plot);
-button = fig[0, :] = Makie.Button(fig; label = "Start/Stop");
+#GLMakie.linkaxes!(evac_plot, death_plot);
+button = fig[0, :] = GLMakie.Button(fig; label = "Start/Stop");
 button.tellwidth = false;
 
 lines = collect(Iterators.flatten(map(seg -> vcat(map(x -> enu_to_tuple(network.nodes[x]), seg), [(NaN, NaN)]), values(network_segments))));
-Makie.lines!(simulation, lines);
+GLMakie.lines!(simulation, lines);
 
 # Render a heatmap
-Makie.heatmap!(simulation, tsunamiˣ, tsunamiʸ, tsunamiᶻ; colormap = :YlGnBu_5, colorrange = (minᶻ, maxᶻ));
+GLMakie.heatmap!(simulation, tsunamiˣ, tsunamiʸ, tsunamiᶻ; colormap = :YlGnBu_5, colorrange = (minᶻ, maxᶻ));
 
-Makie.scatter!(simulation, position_list; color = color_list, markersize = 2, marker = marker_list);
+GLMakie.scatter!(simulation, position_list; color = color_list, markersize = 2, marker = marker_list);
 
-Makie.lines!(evac_plot, evac_list);
-Makie.limits!(evac_plot, 0, 60, 0, num_residents);
+GLMakie.lines!(evac_plot, evac_list);
+GLMakie.limits!(evac_plot, 0, 60, 0, num_residents);
 
-Makie.lines!(death_plot, death_list);
-Makie.limits!(death_plot, 0, 60, 0, 7000);
+GLMakie.lines!(death_plot, death_list);
+GLMakie.limits!(death_plot, 0, 60, 0, 7000);
 
-Makie.lines!(ped_death_plot, ped_death_list);
-Makie.limits!(ped_death_plot, 0, 60, 0, 4000);
+GLMakie.lines!(ped_death_plot, ped_death_list);
+GLMakie.limits!(ped_death_plot, 0, 60, 0, 4000);
 
-Makie.lines!(car_death_plot, car_death_list);
-Makie.limits!(car_death_plot, 0, 60, 0, 4000);
+GLMakie.lines!(car_death_plot, car_death_list);
+GLMakie.limits!(car_death_plot, 0, 60, 0, 4000);
 
-Makie.scatter!(simulation, [shelter.pos for shelter in values(shelters)]; color = :blue);
+GLMakie.scatter!(simulation, [shelter.pos for shelter in values(shelters)]; color = :blue);
 
-simulation.aspect = Makie.DataAspect();
-Makie.hidedecorations!(simulation);
+simulation.aspect = GLMakie.DataAspect();
+GLMakie.hidedecorations!(simulation);
 
 function reset_model!(options, min_wait)::Nothing
     global model = init_model(options..., min_wait);
@@ -845,11 +845,11 @@ run_no_gui(times) = run_no_gui(times, [(default_params[1][1:3]..., (1/default_pa
 run_no_gui() = run_no_gui(1);
 
 function run_gui()::Nothing
-    Makie.display(fig);
+    GLMakie.display(fig);
     nothing
 end
 
-Makie.on(button.clicks) do click
+GLMakie.on(button.clicks) do click
     if click == 1
         hour = convert(Int, hr); # Make sure an hour can be evenly divided by frames
         @async for now in 1:hour
@@ -870,7 +870,7 @@ Makie.on(button.clicks) do click
     end
 end
 
-Makie.on(fig.scene.events.window_open) do status
+GLMakie.on(fig.scene.events.window_open) do status
     # If window just closed, reset for a new run
     if !fig.scene.events.window_open.val
         reset_model!(default_params...);
@@ -879,7 +879,7 @@ end
 
 function run_record(filename)::Nothing
     hour = convert(Int, hr);
-    Makie.record(fig, filename, 1:hour; framerate = 120) do t
+    GLMakie.record(fig, filename, 1:hour; framerate = 120) do t
         curr_time[] = t;
     end
     println("Evacuated: ", length(evacuated));

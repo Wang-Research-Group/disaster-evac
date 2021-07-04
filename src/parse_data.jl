@@ -4,7 +4,7 @@ export network, set_elevations!, get_slopes, get_landslides, tsunami_data, tsuna
 
 import OpenStreetMapX;
 import CSV;
-import Makie;
+import GLMakie;
 import ArchGDAL;
 const OSMX = OpenStreetMapX;
 const AG = ArchGDAL;
@@ -178,7 +178,7 @@ function tsunami_data(initial_time, half_mins, network, dir_name)
     # flip the coordinates so it's not upside down (necessary because the asc files
     # store coordinates with an origin of top left, not bottom left)
     # Use half-mins because that's the interval of the tsunami data
-    z = Makie.@lift(map(x -> x == missing_data_val ? NaN : x, reverse(datasets[string($half_mins * 30)][:, :, 1], dims=2)));
+    z = GLMakie.@lift(map(x -> x == missing_data_val ? NaN : x, reverse(datasets[string($half_mins * 30)][:, :, 1], dims=2)));
     x, y, z
 end
 
