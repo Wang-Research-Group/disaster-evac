@@ -1,6 +1,7 @@
 module DisasterEvac
 
 import OpenStreetMapX;
+import LazyArtifacts;
 import CSV;
 import GLMakie;
 import Agents;
@@ -26,7 +27,7 @@ const location = "coos_bay";
 
 
 # Set up observables
-initial_time = convert(Int, 0s); # Value in frames
+const initial_time = convert(Int, 0s); # Value in frames
 curr_time = GLMakie.Node{Int}(initial_time); # Value in frames
 half_mins = GLMakie.Node{Int}(floor(initial_time / 30s)); # Value rounded down in half-minutes
 
@@ -39,12 +40,13 @@ shelter_dead = [];
 
 function set_filenames()
     filenames = Dict();
-    filenames["network"] = "src/data/" * location * "/map.osm";
-    filenames["elevation"] = "src/data/" * location * "/elevation/elevation.asc";
-    filenames["landslide"] = "src/data/" * location * "/landslide/landslide.asc";
-    filenames["tsunami"] = "src/data/" * location * "/tsunami_inundation";
-    filenames["people"] = "src/data/" * location * "/pop_coordinates.csv";
-    filenames["shelters"] = "src/data/" * location * "/shelter_coordinates.csv";
+    data_path = LazyArtifacts.@artifact_str(location);
+    filenames["network"] = joinpath(data_path, "map.osm");
+    filenames["elevation"] = joinpath(data_path, "elevation", "elevation.asc");
+    filenames["landslide"] = joinpath(data_path, "landslide", "landslide.asc");
+    filenames["tsunami"] = joinpath(data_path, "tsunami_inundation");
+    filenames["people"] = joinpath(data_path, "pop_coordinates.csv");
+    filenames["shelters"] = joinpath(data_path, "shelter_coordinates.csv");
     filenames
 end
 
@@ -66,16 +68,17 @@ num_residents = length(people); # Number of agents
 shelters = Data.shelters(network, filenames["shelters"]);
 
 function refresh_data()::Nothing
+    half_mins[] = floor(initial_time / 30s);
     data = Data.refresh_data(initial_time, half_mins,
                              filenames["network"], filenames["elevation"], filenames["tsunami"],
                              filenames["people"], filenames["shelters"]
     );
-    network = data[1];
-    slopes = data[2];
-    tsunamiˣ, tsunamiʸ, tsunamiᶻ = data[3];
-    minᶻ, maxᶻ = data[4];
-    people = data[5];
-    shelters = data[6];
+    global network = data[1];
+    global slopes = data[2];
+    global tsunamiˣ, tsunamiʸ, tsunamiᶻ = data[3];
+    global minᶻ, maxᶻ = data[4];
+    global people = data[5];
+    global shelters = data[6];
     nothing
 end
 

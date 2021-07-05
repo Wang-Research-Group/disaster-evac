@@ -1,0 +1,32 @@
+# This is where the datasets are retrieved.
+#
+# Sources:
+#
+# Elevation data: OGEO
+# Oregon Geospatial Enterprise Office, 2017. Oregon 10m Digital Elevation Model (DEM).
+#
+# Landslide data: DOGAMI
+# Gabel, L. L. S., O’Brien, F. E., Bauer, J. M., Allan, J. C., 2019. TSUNAMI EVACUATION ANALYSIS OF COMMUNITIES SURROUNDING THE COOS BAY ESTUARY: BUILDING COMMUNITY RESILIENCE ON THE OREGON COAST. Tech. Rep. O-19-07, Oregon Department of Geology and Mineral Industries.
+#
+# Tsunami data: DOGAMI
+# Witter, R. C., Zhang, Y., Wang, K., Priest, G. R., Goldfinger, C., Stimely, L. L., English,J. T., Ferro, P. A., 2011. Simulating Tsunami Inundation at Bandon, Coos County, Oregon, Using Hypothetical Cascadia and Alaska Earthquake Scenarios. Tech. Rep. Special Paper 43, Oregon Department of Geology and Mineral Industries.
+#
+# Population data: census data, with modifications based on road density
+#
+# Shelter data: Chen Chen, Michael K. Lindell, Haizhong Wang, 2021. “Tsunami Preparedness and Resilience in the Cascadia Subduction Zone: A Multistage Model of Expected Evacuation Decisions and Mode Choice,” International Journal of Disaster Risk Reduction. Vol. 59 (2021), 102244.
+
+[seaside]
+git-tree-sha1 = "19de901b81a2098da7e7f6bcab87a0e909962c5a"
+lazy = true
+
+    [[seaside.download]]
+    sha256 = "18d3c507d696df7ce88d36759a55e23ea4f02ce660d2e8345dc0c2297ba97815"
+    url = "https://oregonstate.box.com/shared/static/r7dmi20xcrn8mtki4fm4ctz97zvw94x8.gz"
+
+[coos_bay]
+git-tree-sha1 = "cafbda3db01f0042f2e570dd346268f91cfb61c1"
+lazy = true
+
+    [[coos_bay.download]]
+    sha256 = "c8599456993c99c712ee5f43ce60a227ec1f9d4d44b92c8a811d4978463be6ee"
+    url = "https://oregonstate.box.com/shared/static/t93gbdhqn0pxsuevbezwjypkycmr3g8u.gz"
